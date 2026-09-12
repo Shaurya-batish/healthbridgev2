@@ -1,0 +1,63 @@
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*credentials*.json
+*service-account*.json
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Databases / local data volumes ---
+*.sqlite3
+pgdata/
+redisdata/
+docker-volumes/
+
+# --- Local models / caches (Whisper, Ollama, HF) ---
+.ollama/
+models/
+*.gguf
+*.bin
+.cache/
+
+# --- Build output ---
+dist/
+build/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Claude Code local state ---
+.claude/settings.local.json
