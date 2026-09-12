@@ -1,0 +1,95 @@
+{
+  "rule_table_id": "imnci-danger-signs",
+  "version": "1.0.0",
+  "effective_date": "2026-09-13",
+  "source": "Simplified IMNCI (WHO Integrated Management of Neonatal and Childhood Illness) danger-sign classification for ages 0-59 months. Demo-scoped subset for HealthBridge triage engine.",
+  "severity_order": ["GREEN", "YELLOW", "RED"],
+  "default_severity": "GREEN",
+  "default_rule_id": "DEFAULT-01",
+  "default_description": "No danger sign or classified symptom pattern matched. General home-care advice.",
+  "fact_schema": {
+    "age_months": { "type": "number", "nullable": true },
+    "respiratory_rate_per_min": { "type": "number", "nullable": true },
+    "unable_to_drink_or_feed": { "type": "boolean" },
+    "vomits_everything": { "type": "boolean" },
+    "convulsions": { "type": "boolean" },
+    "lethargic_or_unconscious": { "type": "boolean" },
+    "chest_indrawing": { "type": "boolean" },
+    "stridor_when_calm": { "type": "boolean" },
+    "cough_present": { "type": "boolean" },
+    "diarrhea_present": { "type": "boolean" },
+    "diarrhea_duration_days": { "type": "number", "nullable": true },
+    "blood_in_stool": { "type": "boolean" },
+    "restless_or_irritable": { "type": "boolean" },
+    "sunken_eyes": { "type": "boolean" },
+    "drinks_eagerly_thirsty": { "type": "boolean" },
+    "skin_pinch_slow": { "type": "boolean" },
+    "skin_pinch_very_slow": { "type": "boolean" },
+    "fever_present": { "type": "boolean" },
+    "fever_duration_days": { "type": "number", "nullable": true },
+    "stiff_neck": { "type": "boolean" },
+    "ear_pain": { "type": "boolean" },
+    "ear_discharge": { "type": "boolean" },
+    "tender_swelling_behind_ear": { "type": "boolean" },
+    "visible_severe_wasting": { "type": "boolean" },
+    "edema_both_feet": { "type": "boolean" },
+    "palmar_pallor": { "type": "string", "enum": ["none", "some", "severe"], "nullable": true }
+  },
+  "condition_grammar": {
+    "leaf": "{ field, op: eq|neq|gt|gte|lt|lte|exists, value? }",
+    "all": "{ all: [condition, ...] } -- true iff every sub-condition true",
+    "any": "{ any: [condition, ...] } -- true iff at least one sub-condition true",
+    "atLeast": "{ atLeast: { n: number, conditions: [condition, ...] } } -- true iff at least n sub-conditions true",
+    "missing_field_semantics": "A field absent from extracted facts is treated as null. Boolean leaves compare against null as false (never auto-fire on unknown data). Numeric comparisons (gt/gte/lt/lte) against null are always false."
+  },
+  "rules": [
+    { "id": "GDS-01", "category": "general_danger_sign", "severity": "RED", "description": "Unable to drink or breastfeed", "when": { "field": "unable_to_drink_or_feed", "op": "eq", "value": true } },
+    { "id": "GDS-02", "category": "general_danger_sign", "severity": "RED", "description": "Vomits everything", "when": { "field": "vomits_everything", "op": "eq", "value": true } },
+    { "id": "GDS-03", "category": "general_danger_sign", "severity": "RED", "description": "Convulsions (history or current)", "when": { "field": "convulsions", "op": "eq", "value": true } },
+    { "id": "GDS-04", "category": "general_danger_sign", "severity": "RED", "description": "Lethargic or unconscious", "when": { "field": "lethargic_or_unconscious", "op": "eq", "value": true } },
+    { "id": "RESP-01", "category": "respiratory", "severity": "RED", "description": "Chest indrawing", "when": { "field": "chest_indrawing", "op": "eq", "value": true } },
+    { "id": "RESP-02", "category": "respiratory", "severity": "RED", "description": "Stridor when calm", "when": { "field": "stridor_when_calm", "op": "eq", "value": true } },
+    {
+      "id": "RESP-03",
+      "category": "respiratory",
+      "severity": "YELLOW",
+      "description": "Fast breathing for age (WHO age-banded threshold)",
+      "when": {
+        "any": [
+          { "all": [ { "field": "age_months", "op": "lt", "value": 2 }, { "field": "respiratory_rate_per_min", "op": "gte", "value": 60 } ] },
+          { "all": [ { "field": "age_months", "op": "gte", "value": 2 }, { "field": "age_months", "op": "lt", "value": 12 }, { "field": "respiratory_rate_per_min", "op": "gte", "value": 50 } ] },
+          { "all": [ { "field": "age_months", "op": "gte", "value": 12 }, { "field": "age_months", "op": "lt", "value": 60 }, { "field": "respiratory_rate_per_min", "op": "gte", "value": 40 } ] }
+        ]
+      }
+    },
+    { "id": "DIAR-01", "category": "diarrhea", "severity": "RED", "description": "Severe dehydration: sunken eyes with very slow skin pinch", "when": { "all": [ { "field": "sunken_eyes", "op": "eq", "value": true }, { "field": "skin_pinch_very_slow", "op": "eq", "value": true } ] } },
+    {
+      "id": "DIAR-02",
+      "category": "diarrhea",
+      "severity": "YELLOW",
+      "description": "Some dehydration: at least two of restless/irritable, sunken eyes, drinks eagerly, slow skin pinch",
+      "when": {
+        "atLeast": {
+          "n": 2,
+          "conditions": [
+            { "field": "restless_or_irritable", "op": "eq", "value": true },
+            { "field": "sunken_eyes", "op": "eq", "value": true },
+            { "field": "drinks_eagerly_thirsty", "op": "eq", "value": true },
+            { "field": "skin_pinch_slow", "op": "eq", "value": true }
+          ]
+        }
+      }
+    },
+    { "id": "DIAR-03", "category": "diarrhea", "severity": "YELLOW", "description": "Blood in stool (dysentery)", "when": { "field": "blood_in_stool", "op": "eq", "value": true } },
+    { "id": "DIAR-04", "category": "diarrhea", "severity": "YELLOW", "description": "Persistent diarrhea (>= 14 days)", "when": { "field": "diarrhea_duration_days", "op": "gte", "value": 14 } },
+    { "id": "FEV-01", "category": "fever", "severity": "RED", "description": "Fever with stiff neck (possible meningitis)", "when": { "all": [ { "field": "fever_present", "op": "eq", "value": true }, { "field": "stiff_neck", "op": "eq", "value": true } ] } },
+    { "id": "FEV-02", "category": "fever", "severity": "YELLOW", "description": "Fever for 7 or more days", "when": { "all": [ { "field": "fever_present", "op": "eq", "value": true }, { "field": "fever_duration_days", "op": "gte", "value": 7 } ] } },
+    { "id": "FEV-03", "category": "fever", "severity": "YELLOW", "description": "Fever present, needs assessment", "when": { "field": "fever_present", "op": "eq", "value": true } },
+    { "id": "EAR-01", "category": "ear", "severity": "RED", "description": "Tender swelling behind the ear (mastoiditis)", "when": { "field": "tender_swelling_behind_ear", "op": "eq", "value": true } },
+    { "id": "EAR-02", "category": "ear", "severity": "YELLOW", "description": "Ear pain or discharge", "when": { "any": [ { "field": "ear_pain", "op": "eq", "value": true }, { "field": "ear_discharge", "op": "eq", "value": true } ] } },
+    { "id": "NUT-01", "category": "nutrition", "severity": "RED", "description": "Visible severe wasting", "when": { "field": "visible_severe_wasting", "op": "eq", "value": true } },
+    { "id": "NUT-02", "category": "nutrition", "severity": "RED", "description": "Edema of both feet", "when": { "field": "edema_both_feet", "op": "eq", "value": true } },
+    { "id": "NUT-03", "category": "nutrition", "severity": "RED", "description": "Severe palmar pallor", "when": { "field": "palmar_pallor", "op": "eq", "value": "severe" } },
+    { "id": "NUT-04", "category": "nutrition", "severity": "YELLOW", "description": "Some palmar pallor", "when": { "field": "palmar_pallor", "op": "eq", "value": "some" } }
+  ]
+}

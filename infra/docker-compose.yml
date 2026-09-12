@@ -1,0 +1,85 @@
+name: healthbridge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: healthbridge
+      POSTGRES_PASSWORD: healthbridge
+      POSTGRES_DB: healthbridge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthbridge -d healthbridge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  core:
+    build:
+      context: ../services/core
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://healthbridge:healthbridge@postgres:5432/healthbridge
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ai:
+    build:
+      context: ../services/ai
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-phi4-mini}
+      PORT: 8100
+      RULES_PATH: /rules/imnci-rules.v1.json
+    volumes:
+      - ../rules:/rules:ro
+    ports:
+      - "8100:8100"
+    # AI service is intentionally not a hard dependency of anything else at
+    # the compose level -- it must be safe to run without it (offline
+    # degradation), so nothing here `depends_on` it.
+
+  web:
+    build:
+      context: ../apps/web
+    restart: unless-stopped
+    environment:
+      CORE_SERVICE_URL: http://core:8000
+      AI_SERVICE_URL: http://ai:8100
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core
+      - ai
+
+volumes:
+  pgdata:
+  redisdata:

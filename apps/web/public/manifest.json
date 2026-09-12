@@ -1,0 +1,13 @@
+{
+  "name": "HealthBridge ASHA",
+  "short_name": "HealthBridge",
+  "description": "Offline-first ASHA field app for rural triage, patient records, and queue tokens.",
+  "start_url": "/asha",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f766e",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
