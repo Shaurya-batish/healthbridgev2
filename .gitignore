@@ -69,3 +69,9 @@ Thumbs.db
 # --- Scratch / working files (not source) ---
 scratch_*.txt
 scratch_*.pdf
+
+# --- Integrated boot transcript (regenerated every run) ---
+boot-log.txt
+
+# --- Agent output folder (duplicates docs already in the repo) ---
+Claude outputs/
