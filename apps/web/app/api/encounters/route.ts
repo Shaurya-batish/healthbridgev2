@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
+import { authHeader, coreRequest, idempotencyHeader, UpstreamError } from "@/lib/api-client";
 import { getSessionToken } from "@/lib/auth";
 
 export async function POST(req: Request) {
@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   try {
     const encounter = await coreRequest("/encounters", {
       method: "POST",
-      headers: authHeader(getSessionToken()),
+      headers: { ...authHeader(getSessionToken()), ...idempotencyHeader(req) },
       body: JSON.stringify(body),
     });
     return NextResponse.json(encounter, { status: 201 });

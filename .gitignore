@@ -65,3 +65,7 @@ Thumbs.db
 
 # --- Claude Code local state ---
 .claude/settings.local.json
+
+# --- Scratch / working files (not source) ---
+scratch_*.txt
+scratch_*.pdf

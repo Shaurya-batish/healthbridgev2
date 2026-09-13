@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
+import { authHeader, coreRequest, idempotencyHeader, UpstreamError } from "@/lib/api-client";
 import { getSessionToken } from "@/lib/auth";
 
 // Persists a triage decision — used both for the LLM path (after
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   try {
     const result = await coreRequest("/triage", {
       method: "POST",
-      headers: authHeader(token),
+      headers: { ...authHeader(token), ...idempotencyHeader(req) },
       body: JSON.stringify(body),
     });
     return NextResponse.json(result, { status: 201 });

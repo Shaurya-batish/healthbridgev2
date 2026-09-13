@@ -13,4 +13,6 @@ COPY rules ./rules
 ENV PORT=8100
 EXPOSE 8100
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
+# Shell form (not exec-form array) so ${PORT} actually expands -- this was
+# previously hardcoded to 8100 regardless of the PORT env var's value.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8100}"]

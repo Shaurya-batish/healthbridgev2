@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.fhir import build_encounter_resource
+from app.idempotency import check_idempotency, record_idempotency
 from app.models import Encounter, Facility, Patient, QueueToken
 from app.schemas import EncounterCreateRequest, EncounterResponse
 from app.security import CurrentUser, require_facility_access
@@ -14,8 +15,17 @@ router = APIRouter(prefix="/encounters", tags=["encounters"])
 
 
 @router.post("", response_model=EncounterResponse, status_code=status.HTTP_201_CREATED)
-def create_encounter(payload: EncounterCreateRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> EncounterResponse:
+def create_encounter(
+    payload: EncounterCreateRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> EncounterResponse:
     require_facility_access(current_user, payload.facility_id)
+    cached = check_idempotency(db, idempotency_key, "create_encounter")
+    if cached is not None:
+        return cached
+
     patient = db.scalar(select(Patient).where(Patient.abha_number == payload.abha_number))
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="patient_not_found")
@@ -61,6 +71,10 @@ def create_encounter(payload: EncounterCreateRequest, current_user: CurrentUser,
         status="waiting",
     )
     db.add(queue_token)
-    db.commit()
+    db.flush()
     db.refresh(encounter)
-    return EncounterResponse.model_validate(encounter, from_attributes=True)
+
+    response = EncounterResponse.model_validate(encounter, from_attributes=True)
+    record_idempotency(db, idempotency_key, "create_encounter", status.HTTP_201_CREATED, response.model_dump(mode="json"))
+    db.commit()
+    return response

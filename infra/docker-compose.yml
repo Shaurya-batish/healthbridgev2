@@ -48,10 +48,28 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # python:3.11-slim has no curl/wget -- urllib is stdlib, needs no
+      # extra install. /health intentionally never requires auth or a
+      # live DB (see app/db.py) so this only fails if the process itself
+      # is unresponsive.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   ai:
     build:
-      context: ../services/ai
+      # Must be the repo root, not services/ai -- the Dockerfile COPYs
+      # services/ai/* and the shared rules/ directory using paths relative
+      # to the repo root (see the Dockerfile's own header comment). The
+      # previous `context: ../services/ai` made every COPY path wrong
+      # (e.g. `COPY services/ai/app ./app` would look for
+      # services/ai/services/ai/app, which doesn't exist) -- `docker
+      # compose build` failed outright for this service before this fix.
+      context: ..
+      dockerfile: services/ai/Dockerfile
     restart: unless-stopped
     environment:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
@@ -65,10 +83,20 @@ services:
     # AI service is intentionally not a hard dependency of anything else at
     # the compose level -- it must be safe to run without it (offline
     # degradation), so nothing here `depends_on` it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   web:
     build:
-      context: ../apps/web
+      # Same reasoning as the ai service above -- the Dockerfile's own
+      # header comment documents that this must be the repo root so it can
+      # COPY both apps/web/* and the shared rules/ directory.
+      context: ..
+      dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     environment:
       CORE_SERVICE_URL: http://core:8000
@@ -78,8 +106,25 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - core
-      - ai
+      core:
+        # web proxies every request to Core -- wait for it to actually be
+        # ready to serve traffic, not just for the container to start.
+        condition: service_healthy
+      ai:
+        # AI stays a soft dependency, per CLAUDE.md's offline-degradation
+        # architecture -- wait for the container to start, not for it to
+        # be healthy, so web still comes up if AI/Ollama never becomes
+        # ready.
+        condition: service_started
+    healthcheck:
+      # node:20-alpine has no curl either. /login is public (no session
+      # required) and always renders, so this only fails if the Next.js
+      # server itself is unresponsive.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/login', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   pgdata:

@@ -68,8 +68,8 @@ async function put(op: QueuedOperation): Promise<void> {
   await db.put(STORE, op);
 }
 
-export async function enqueueCreatePatient(endpoint: string, payload: Record<string, unknown>): Promise<void> {
-  await put({ id: newId(), type: "create_patient", endpoint, payload, created_at: new Date().toISOString() });
+export async function enqueueCreatePatient(endpoint: string, payload: Record<string, unknown>, id: string = newId()): Promise<void> {
+  await put({ id, type: "create_patient", endpoint, payload, created_at: new Date().toISOString() });
 }
 
 export async function listPending(): Promise<QueuedOperation[]> {
@@ -83,12 +83,27 @@ async function removeOperation(id: string): Promise<void> {
   await db.delete(STORE, id);
 }
 
-async function postJson(endpoint: string, payload: unknown): Promise<{ ok: true; body: any } | { ok: false; networkError: true } | { ok: false; networkError: false; status: number; body: unknown }> {
+async function postJson(
+  endpoint: string,
+  payload: unknown,
+  idempotencyKey?: string,
+): Promise<{ ok: true; body: any } | { ok: false; networkError: true } | { ok: false; networkError: false; status: number; body: unknown }> {
   let res: Response;
   try {
     res = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // Idempotency-Key: a network timeout where the server actually
+      // succeeded but the client saw a failure used to mean a genuine
+      // retry (here, or via the offline queue below) could create a
+      // duplicate patient/encounter/triage record. Every call site below
+      // passes the SAME key on every attempt of the same logical
+      // operation (the queued op's own id, generated once up front) so
+      // Core (see services/core/app/idempotency.py) replays the original
+      // response on a retry instead of repeating the write.
+      headers: {
+        "Content-Type": "application/json",
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      },
       body: JSON.stringify(payload),
     });
   } catch {
@@ -127,12 +142,18 @@ export async function submitCreatePatient(
   endpoint: string,
   payload: Record<string, unknown>,
 ): Promise<{ status: "sent"; body: unknown } | { status: "queued" } | { status: "rejected"; detail: unknown }> {
+  // Generated once, up front, and reused on every attempt of this same
+  // logical operation (this direct try, and the queued retry below if it
+  // comes to that) -- this is what lets Core recognize a retry as a
+  // retry rather than a new write.
+  const opId = newId();
+
   if (navigator.onLine) {
-    const result = await postJson(endpoint, payload);
+    const result = await postJson(endpoint, payload, opId);
     if (result.ok) return { status: "sent", body: result.body };
     if (!result.networkError) return { status: "rejected", detail: result.body };
   }
-  await enqueueCreatePatient(endpoint, payload);
+  await enqueueCreatePatient(endpoint, payload, opId);
   return { status: "queued" };
 }
 
@@ -147,9 +168,16 @@ export async function submitEncounterAndTriage(
   triageEndpoint: string,
   triagePayload: Record<string, unknown>,
 ): Promise<SubmitOutcome> {
+  // Generated once, up front, and reused for BOTH the encounter and
+  // triage calls, on every attempt (the initial direct try below and any
+  // queued retry that follows) -- Core's idempotency cache is keyed by
+  // (key, endpoint) together, so one shared id never collides between the
+  // two endpoints (see services/core/app/idempotency.py).
+  const opId = newId();
+
   if (!navigator.onLine) {
     await put({
-      id: newId(),
+      id: opId,
       type: "encounter_with_triage",
       encounterEndpoint,
       encounterPayload,
@@ -160,11 +188,11 @@ export async function submitEncounterAndTriage(
     return { status: "queued" };
   }
 
-  const encounterResult = await postJson(encounterEndpoint, encounterPayload);
+  const encounterResult = await postJson(encounterEndpoint, encounterPayload, opId);
   if (!encounterResult.ok) {
     if (encounterResult.networkError) {
       await put({
-        id: newId(),
+        id: opId,
         type: "encounter_with_triage",
         encounterEndpoint,
         encounterPayload,
@@ -179,13 +207,13 @@ export async function submitEncounterAndTriage(
 
   const encounterId = encounterResult.body.id;
   const resolvedTriagePayload = { ...triagePayload, encounter_id: encounterId };
-  const triageResult = await postJson(triageEndpoint, resolvedTriagePayload);
+  const triageResult = await postJson(triageEndpoint, resolvedTriagePayload, opId);
 
   if (triageResult.ok) return { status: "sent", triageRecord: triageResult.body };
 
   if (triageResult.networkError) {
     await put({
-      id: newId(),
+      id: opId,
       type: "triage_only",
       endpoint: triageEndpoint,
       payload: resolvedTriagePayload,

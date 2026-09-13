@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.adapters.scheme_verification_client import (
 )
 from app.db import get_db
 from app.fhir import build_patient_resource
+from app.idempotency import check_idempotency, record_idempotency
 from app.models import Encounter, Patient
 from app.schemas import PatientCreateRequest, PatientDetailResponse, PatientResponse, SchemeVerificationResponse
 from app.security import CurrentUser
@@ -25,7 +27,16 @@ _scheme_client: SchemeVerificationClient = NhaBeneficiaryClient()
 
 
 @router.post("", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
-def create_patient(payload: PatientCreateRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> PatientResponse:
+def create_patient(
+    payload: PatientCreateRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> PatientResponse:
+    cached = check_idempotency(db, idempotency_key, "create_patient")
+    if cached is not None:
+        return cached
+
     existing = db.scalar(select(Patient).where(Patient.abha_number == payload.abha_number))
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="abha_number_already_registered")
@@ -46,7 +57,7 @@ def create_patient(payload: PatientCreateRequest, current_user: CurrentUser, db:
     )
     db.add(patient)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError as exc:
         # The pre-check above is a TOCTOU race, not a guarantee: two
         # concurrent registrations for the same ABHA number can both pass
@@ -57,7 +68,14 @@ def create_patient(payload: PatientCreateRequest, current_user: CurrentUser, db:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="abha_number_already_registered") from exc
     db.refresh(patient)
-    return PatientResponse.model_validate(patient, from_attributes=True)
+
+    response = PatientResponse.model_validate(patient, from_attributes=True)
+    # Staged in the same transaction as the patient row itself (flushed
+    # above, committed below) -- the write and its replay cache entry can
+    # never land separately.
+    record_idempotency(db, idempotency_key, "create_patient", status.HTTP_201_CREATED, response.model_dump(mode="json"))
+    db.commit()
+    return response
 
 
 @router.get("/{abha_number}", response_model=PatientDetailResponse)

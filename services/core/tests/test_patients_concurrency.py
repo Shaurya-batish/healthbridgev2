@@ -25,8 +25,10 @@ from tests.conftest import auth_headers
 
 class _FakeSession:
     """Minimal stand-in: the pre-check finds nothing (simulating the race
-    window), but commit() raises IntegrityError (simulating the unique
-    constraint firing on the concurrent duplicate)."""
+    window), but flush() raises IntegrityError (simulating the unique
+    constraint firing on the concurrent duplicate) -- create_patient now
+    flushes before commit so an idempotency-cache row can be staged in the
+    same transaction as a successful write."""
 
     def scalar(self, *args, **kwargs):
         return None
@@ -34,8 +36,11 @@ class _FakeSession:
     def add(self, *args, **kwargs):
         pass
 
-    def commit(self):
+    def flush(self):
         raise IntegrityError("INSERT INTO patients ...", {}, Exception("duplicate key value violates unique constraint"))
+
+    def commit(self):
+        pass
 
     def rollback(self):
         pass

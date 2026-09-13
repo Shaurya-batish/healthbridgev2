@@ -262,4 +262,24 @@ class Teleconsult(Base):
     doctor_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class IdempotencyKey(Base):
+    """Replay cache for the write endpoints an unreliable network can
+    retry: POST /patients, /encounters, /triage. A client (in practice,
+    the ASHA app's offline queue -- see apps/web/lib/offline-queue.ts)
+    sends the same Idempotency-Key on every attempt of the same logical
+    operation. response_body is a JSON string, not JSONB, deliberately --
+    this keeps the table creatable on SQLite for tests, unlike
+    patients/encounters/observations.
+    """
+
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (UniqueConstraint("idempotency_key", "endpoint", name="uq_idempotency_key_endpoint"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

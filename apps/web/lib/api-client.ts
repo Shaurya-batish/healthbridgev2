@@ -47,3 +47,11 @@ export function aiRequest(path: string, init?: RequestInit): Promise<unknown> {
 export function authHeader(token: string | undefined): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+/** Forwards a client-supplied Idempotency-Key straight through to Core --
+ * see services/core/app/idempotency.py. Absent header -> no replay
+ * protection for that request, never an error. */
+export function idempotencyHeader(req: Request): Record<string, string> {
+  const key = req.headers.get("Idempotency-Key");
+  return key ? { "Idempotency-Key": key } : {};
+}

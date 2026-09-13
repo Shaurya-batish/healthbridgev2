@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.fhir import build_observation_resource
+from app.idempotency import check_idempotency, record_idempotency
 from app.models import (
     SEVERITY_RANK,
     AuditLog,
@@ -40,7 +41,12 @@ def _queue_position(db: Session, facility_id: uuid.UUID, token: QueueToken) -> i
 
 
 @router.post("", response_model=TriageResponse, status_code=status.HTTP_201_CREATED)
-def submit_triage(payload: TriageRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> TriageResponse:
+def submit_triage(
+    payload: TriageRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TriageResponse:
     """The audit-critical write path.
 
     Every call -- regardless of severity, regardless of source (LLM or
@@ -53,6 +59,13 @@ def submit_triage(payload: TriageRequest, current_user: CurrentUser, db: Session
     if encounter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
     require_facility_access(current_user, encounter.facility_id)
+
+    cached = check_idempotency(db, idempotency_key, "submit_triage")
+    if cached is not None:
+        return cached
+    # A retry that hits this cache never reaches publish_escalation below
+    # either -- a duplicate RED submission no longer means a duplicate
+    # doctor notification.
 
     observation = Observation(
         encounter_id=encounter.id,
@@ -126,14 +139,17 @@ def submit_triage(payload: TriageRequest, current_user: CurrentUser, db: Session
         )
     )
 
-    db.commit()
+    db.flush()
     db.refresh(triage_record)
     db.refresh(queue_token)
 
     position = _queue_position(db, encounter.facility_id, queue_token)
 
-    return TriageResponse(
+    response = TriageResponse(
         triage_record=TriageRecordResponse.model_validate(triage_record, from_attributes=True),
         queue_position=position,
         escalation_created=escalation_created,
     )
+    record_idempotency(db, idempotency_key, "submit_triage", status.HTTP_201_CREATED, response.model_dump(mode="json"))
+    db.commit()
+    return response
