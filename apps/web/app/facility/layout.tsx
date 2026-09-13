@@ -10,6 +10,11 @@ export default function FacilityLayout({ children }: { children: React.ReactNode
           { href: "/facility/queue", label: "Queue" },
           { href: "/facility/escalations", label: "Escalations" },
           { href: "/facility/patients", label: "Patients" },
+          { href: "/facility/referrals", label: "Referrals" },
+          { href: "/facility/diagnostics", label: "Diagnostics" },
+          { href: "/facility/medicine-stock", label: "Medicine stock" },
+          { href: "/facility/follow-ups", label: "Follow-ups" },
+          { href: "/facility/teleconsults", label: "Teleconsults" },
         ]}
       />
       <main className="mx-auto max-w-4xl px-4 py-6">{children}</main>

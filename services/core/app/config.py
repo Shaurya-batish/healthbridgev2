@@ -13,6 +13,25 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 60 * 12
     port: int = 8000
 
+    # --- ABDM Gateway (HIP-side) -- see docs/REAL-INTEGRATION-AUDIT.md ---
+    # Unset by default: real values are issued only after NHA HIP
+    # registration/certification, which is an external process this
+    # environment cannot complete. Never hardcode these -- env vars only.
+    abdm_gateway_base_url: str | None = None
+    abdm_client_id: str | None = None
+    abdm_client_secret: str | None = None
+    abdm_hip_id: str | None = None
+    abdm_cm_id: str = "sbx"
+
+    # --- PM-JAY / state scheme verification (NHA Beneficiary Identification
+    # System) -- also gated on real NHA empanelment credentials ---
+    nha_beneficiary_base_url: str | None = None
+    nha_operator_username: str | None = None
+    nha_operator_password: str | None = None
+
+    # --- Teleconsult store-and-forward media (self-hosted, no external dep) ---
+    teleconsult_media_dir: str = "./data/teleconsult-media"
+
 
 @lru_cache
 def get_settings() -> Settings:

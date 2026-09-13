@@ -4,7 +4,7 @@
 // this same Next.js app, per the architecture ("both clients talk only to
 // the gateway").
 
-const CORE_SERVICE_URL = process.env.CORE_SERVICE_URL ?? "http://localhost:8000";
+export const CORE_SERVICE_URL = process.env.CORE_SERVICE_URL ?? "http://localhost:8000";
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://localhost:8100";
 
 export class UpstreamError extends Error {

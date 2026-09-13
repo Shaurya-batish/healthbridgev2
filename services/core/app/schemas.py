@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ class PatientResponse(BaseModel):
     id: uuid.UUID
     abha_number: str
     scheme_status: str
+    scheme_verification_status: str
     fhir: dict
     created_at: datetime
     updated_at: datetime
@@ -115,3 +116,152 @@ class HealthResponse(BaseModel):
     status: str
     db_reachable: bool
     redis_reachable: bool
+
+
+# --- Real internal workflows (2026-09-13 no-mock policy) ---
+
+ReferralStatusT = Literal["pending", "accepted", "completed", "cancelled"]
+DiagnosticStatusT = Literal["ordered", "in_progress", "completed", "cancelled"]
+StockMovementReasonT = Literal["restock", "dispensed", "adjustment"]
+FollowUpStatusT = Literal["scheduled", "completed", "missed", "cancelled"]
+TeleconsultStatusT = Literal["pending", "recorded", "reviewed"]
+
+
+class ReferralCreateRequest(BaseModel):
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    from_facility_id: uuid.UUID
+    to_facility_id: uuid.UUID
+    reason: str
+
+
+class ReferralStatusUpdateRequest(BaseModel):
+    status: ReferralStatusT
+
+
+class ReferralResponse(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    from_facility_id: uuid.UUID
+    to_facility_id: uuid.UUID
+    reason: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DiagnosticOrderCreateRequest(BaseModel):
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    test_name: str
+
+
+class DiagnosticStatusUpdateRequest(BaseModel):
+    status: DiagnosticStatusT
+
+
+class DiagnosticResultRequest(BaseModel):
+    result_text: str
+
+
+class DiagnosticOrderResponse(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    test_name: str
+    status: str
+    result_text: str | None
+    result_recorded_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MedicineStockCreateRequest(BaseModel):
+    facility_id: uuid.UUID
+    medicine_name: str
+    unit: str = "units"
+    reorder_threshold: int = 0
+    initial_quantity: int = 0
+
+
+class MedicineStockAdjustRequest(BaseModel):
+    change_qty: int
+    reason: StockMovementReasonT
+    actor_user_id: uuid.UUID | None = None
+
+
+class MedicineStockResponse(BaseModel):
+    id: uuid.UUID
+    facility_id: uuid.UUID
+    medicine_name: str
+    unit: str
+    quantity_on_hand: int
+    reorder_threshold: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class MedicineStockMovementResponse(BaseModel):
+    id: uuid.UUID
+    stock_id: uuid.UUID
+    change_qty: int
+    reason: str
+    actor_user_id: uuid.UUID | None
+    created_at: datetime
+
+
+class FollowUpCreateRequest(BaseModel):
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    scheduled_date: date
+    reason: str
+
+
+class FollowUpStatusUpdateRequest(BaseModel):
+    status: FollowUpStatusT
+
+
+class FollowUpResponse(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    scheduled_date: date
+    reason: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeleconsultCreateRequest(BaseModel):
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    facility_id: uuid.UUID
+    requested_by_user_id: uuid.UUID | None = None
+
+
+class TeleconsultResponseRequest(BaseModel):
+    doctor_response_text: str
+
+
+class TeleconsultResponse(BaseModel):
+    id: uuid.UUID
+    encounter_id: uuid.UUID
+    patient_id: uuid.UUID
+    facility_id: uuid.UUID
+    requested_by_user_id: uuid.UUID | None
+    status: str
+    media_content_type: str | None
+    media_size_bytes: int | None
+    media_checksum_sha256: str | None
+    doctor_response_text: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SchemeVerificationResponse(BaseModel):
+    abha_number: str
+    scheme_status: str
+    scheme_verification_status: str

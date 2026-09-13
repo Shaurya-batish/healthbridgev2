@@ -1,12 +1,22 @@
 import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
 import { getSessionToken } from "@/lib/auth";
+import { requireFacilitySession } from "@/lib/server-session";
 import { SchemeBadge } from "@/components/SchemeBadge";
 import type { Encounter, Patient } from "@/lib/types";
+import { VerifySchemeButton } from "./VerifySchemeButton";
+import { PatientActionForms } from "./PatientActionForms";
+
+// ABDM's real, spec-accurate adapter is not yet connected to the live
+// gateway -- see docs/REAL-INTEGRATION-AUDIT.md. This distinguishes "we
+// haven't registered with NHA yet" from "the patient has no linked
+// record" rather than collapsing both into one vague label.
+type AbdmStatus = "linked" | "not_configured" | "unavailable" | "not_found";
 
 export default async function FacilityPatientPage({ params }: { params: { abha: string } }) {
+  const session = await requireFacilitySession();
   const token = getSessionToken();
   let patient: (Patient & { encounters?: Encounter[] }) | null = null;
-  let abdmBundle: unknown = null;
+  let abdmStatus: AbdmStatus = "not_found";
 
   try {
     patient = (await coreRequest(`/patients/${encodeURIComponent(params.abha)}`, {
@@ -21,10 +31,20 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
   }
 
   try {
-    abdmBundle = await coreRequest(`/abdm/patient/${encodeURIComponent(params.abha)}`, { headers: authHeader(token) });
-  } catch {
-    abdmBundle = null;
+    await coreRequest(`/abdm/patient/${encodeURIComponent(params.abha)}`, { headers: authHeader(token) });
+    abdmStatus = "linked";
+  } catch (err) {
+    if (err instanceof UpstreamError && err.status === 501) abdmStatus = "not_configured";
+    else if (err instanceof UpstreamError && err.status === 404) abdmStatus = "not_found";
+    else abdmStatus = "unavailable";
   }
+
+  const ABDM_LABELS: Record<AbdmStatus, string> = {
+    linked: "ABDM record linked",
+    not_configured: "ABDM not connected (NHA registration pending — see docs/REAL-INTEGRATION-AUDIT.md)",
+    unavailable: "ABDM unreachable right now",
+    not_found: "No ABDM-linked record found",
+  };
 
   return (
     <div className="space-y-4">
@@ -35,13 +55,31 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
             <p className="text-sm text-slate-500">ABHA: {patient.abha_number}</p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <SchemeBadge status={patient.scheme_status} />
-            <span
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                abdmBundle ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-300 bg-slate-50 text-slate-500"
-              }`}
-            >
-              {abdmBundle ? "ABDM record linked (sandbox)" : "ABDM record unavailable"}
+            <div className="flex items-center gap-2">
+              <SchemeBadge status={patient.scheme_status} />
+              {patient.scheme_status !== "none" && (
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                    patient.scheme_verification_status === "verified"
+                      ? "border-teal-300 bg-teal-50 text-teal-700"
+                      : patient.scheme_verification_status === "failed"
+                        ? "border-severity-red bg-severity-red-bg text-severity-red"
+                        : "border-slate-300 bg-slate-50 text-slate-500"
+                  }`}
+                >
+                  {patient.scheme_verification_status === "verified"
+                    ? "Verified"
+                    : patient.scheme_verification_status === "failed"
+                      ? "Verification failed"
+                      : "Not verified"}
+                </span>
+              )}
+            </div>
+            {patient.scheme_status !== "none" && patient.scheme_verification_status !== "verified" && (
+              <VerifySchemeButton abhaNumber={patient.abha_number} />
+            )}
+            <span className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
+              {ABDM_LABELS[abdmStatus]}
             </span>
           </div>
         </div>
@@ -58,6 +96,14 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
           ))}
         </ul>
       </div>
+
+      {patient.encounters && patient.encounters.length > 0 && (
+        <PatientActionForms
+          patientId={patient.id}
+          encounterId={patient.encounters[0].id}
+          facilityId={session.facility_id}
+        />
+      )}
 
       <details className="rounded-lg border border-slate-200 bg-white p-5">
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">Raw FHIR Patient resource</summary>

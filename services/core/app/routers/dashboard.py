@@ -5,15 +5,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Encounter, EscalationEvent, QueueToken, TriageRecord
+from app.models import Encounter, EscalationEvent, QueueToken, Teleconsult, TriageRecord
 from app.schemas import DashboardResponse
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
-
-# Teleconsult is a store-and-forward mock per CLAUDE.md -- no live infra, no
-# table of its own yet. Exposed as a static 0 here so the tile is honest
-# about being unwired rather than silently fabricating a number.
-TELECONSULTS_DONE_MOCK = 0
 
 
 @router.get("/{facility_id}", response_model=DashboardResponse)
@@ -42,9 +37,17 @@ def get_dashboard(facility_id: uuid.UUID, db: Session = Depends(get_db)) -> Dash
         select(func.count()).select_from(EscalationEvent).where(EscalationEvent.facility_id == facility_id)
     ) or 0
 
+    # Real count -- a teleconsult only counts as "done" once a doctor has
+    # actually reviewed the real recorded media and left a real response.
+    teleconsults_done = db.scalar(
+        select(func.count())
+        .select_from(Teleconsult)
+        .where(Teleconsult.facility_id == facility_id, Teleconsult.status == "reviewed")
+    ) or 0
+
     return DashboardResponse(
         triaged_by_severity=triaged_by_severity,
         queue_length=queue_length,
-        teleconsults_done=TELECONSULTS_DONE_MOCK,
+        teleconsults_done=teleconsults_done,
         red_cases_escalated=red_cases_escalated,
     )

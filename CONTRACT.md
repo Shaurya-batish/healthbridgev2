@@ -77,6 +77,15 @@ CREATE TYPE triage_source AS ENUM ('llm', 'checklist');
 CREATE TYPE token_status AS ENUM ('waiting', 'in_progress', 'done');
 CREATE TYPE escalation_status AS ENUM ('open', 'acknowledged', 'resolved');
 CREATE TYPE scheme_status_enum AS ENUM ('PMJAY', 'state', 'none');
+-- Real verification state, distinct from the ASHA's self-reported claim
+-- above -- see docs/REAL-INTEGRATION-AUDIT.md. Only moved off 'unverified'
+-- by a real NHA BIS call; never fabricated.
+CREATE TYPE scheme_verification_status AS ENUM ('unverified', 'pending', 'verified', 'failed');
+CREATE TYPE referral_status AS ENUM ('pending', 'accepted', 'completed', 'cancelled');
+CREATE TYPE diagnostic_status AS ENUM ('ordered', 'in_progress', 'completed', 'cancelled');
+CREATE TYPE stock_movement_reason AS ENUM ('restock', 'dispensed', 'adjustment');
+CREATE TYPE follow_up_status AS ENUM ('scheduled', 'completed', 'missed', 'cancelled');
+CREATE TYPE teleconsult_status AS ENUM ('pending', 'recorded', 'reviewed');
 
 CREATE TABLE facilities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -99,6 +108,7 @@ CREATE TABLE patients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   abha_number TEXT UNIQUE NOT NULL,
   scheme_status scheme_status_enum NOT NULL DEFAULT 'none',
+  scheme_verification_status scheme_verification_status NOT NULL DEFAULT 'unverified',
   fhir JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -163,6 +173,88 @@ CREATE TABLE audit_log (
   details JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Real internal workflows (2026-09-13 no-mock policy). None of these need
+-- an external credential -- same-system operational data, same category
+-- as queue_tokens/escalation_events above.
+
+CREATE TABLE referrals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id UUID NOT NULL REFERENCES patients(id),
+  encounter_id UUID NOT NULL REFERENCES encounters(id),
+  from_facility_id UUID NOT NULL REFERENCES facilities(id),
+  to_facility_id UUID NOT NULL REFERENCES facilities(id),
+  reason TEXT NOT NULL,
+  status referral_status NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE diagnostic_orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  encounter_id UUID NOT NULL REFERENCES encounters(id),
+  facility_id UUID NOT NULL REFERENCES facilities(id),
+  test_name TEXT NOT NULL,
+  status diagnostic_status NOT NULL DEFAULT 'ordered',
+  result_text TEXT,
+  result_recorded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE medicine_stock (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id UUID NOT NULL REFERENCES facilities(id),
+  medicine_name TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT 'units',
+  quantity_on_hand INTEGER NOT NULL DEFAULT 0,
+  reorder_threshold INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (facility_id, medicine_name)
+);
+
+-- Append-only ledger. quantity_on_hand above is always reconstructable as
+-- the sum of these -- a real audit trail, never a bare mutable counter.
+CREATE TABLE medicine_stock_movements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  stock_id UUID NOT NULL REFERENCES medicine_stock(id),
+  change_qty INTEGER NOT NULL,
+  reason stock_movement_reason NOT NULL,
+  actor_user_id UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE follow_ups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id UUID NOT NULL REFERENCES patients(id),
+  encounter_id UUID NOT NULL REFERENCES encounters(id),
+  facility_id UUID NOT NULL REFERENCES facilities(id),
+  scheduled_date DATE NOT NULL,
+  reason TEXT NOT NULL,
+  status follow_up_status NOT NULL DEFAULT 'scheduled',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Real self-hosted store-and-forward teleconsult. media_path points at a
+-- real file on disk under TELECONSULT_MEDIA_DIR; media_checksum_sha256 is
+-- computed from the real uploaded bytes.
+CREATE TABLE teleconsults (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  encounter_id UUID NOT NULL REFERENCES encounters(id),
+  patient_id UUID NOT NULL REFERENCES patients(id),
+  facility_id UUID NOT NULL REFERENCES facilities(id),
+  requested_by_user_id UUID REFERENCES users(id),
+  status teleconsult_status NOT NULL DEFAULT 'pending',
+  media_path TEXT,
+  media_content_type TEXT,
+  media_size_bytes INTEGER,
+  media_checksum_sha256 TEXT,
+  doctor_response_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
 Every triage decision (any severity) writes one `audit_log` row naming
@@ -181,8 +273,14 @@ service and never blocks on it.
 - `GET /queue/{facility_id}` → tokens ordered `RED` → `YELLOW` → `GREEN`, then FIFO within severity
 - `GET /escalations/{facility_id}` → open escalations
 - `POST /escalations/{id}/acknowledge` → sets `acknowledged`
-- `GET /dashboard/{facility_id}` → `{triaged_by_severity: {RED, YELLOW, GREEN}, queue_length, teleconsults_done, red_cases_escalated}`
-- `GET /abdm/patient/{abha_number}` → delegates to `MockAbdmClient` (in `services/core/adapters/`), returns a sandbox-shaped FHIR bundle. This adapter is the seam a real ABDM gateway client swaps into later — do not inline mock logic elsewhere.
+- `GET /dashboard/{facility_id}` → `{triaged_by_severity: {RED, YELLOW, GREEN}, queue_length, teleconsults_done, red_cases_escalated}` — `teleconsults_done` counts real `teleconsults` rows with `status = 'reviewed'`.
+- `GET /abdm/patient/{abha_number}` → delegates to `AbdmGatewayClient` (in `services/core/app/adapters/abdm_client.py`), a real client built against the ABDM Gateway's session-token + care-context-discovery API shape. Returns `501 {"detail": "abdm_not_configured"}` when NHA credentials aren't set (never a fabricated bundle) or `502 {"detail": "abdm_unavailable"}` on a real call failure. See `docs/REAL-INTEGRATION-AUDIT.md`.
+- `POST /patients/{abha_number}/verify-scheme` → delegates to `NhaBeneficiaryClient` (real PM-JAY BIS client shape). Returns `501 {"detail": "scheme_verification_not_configured"}` when NHA operator credentials aren't set; only ever sets `scheme_verification_status` to `verified`/`failed` on a real call succeeding.
+- `POST /referrals`, `GET /referrals/facility/{facility_id}`, `GET /referrals/patient/{patient_id}`, `POST /referrals/{id}/status` → real cross-facility referral tracking.
+- `POST /diagnostics`, `GET /diagnostics/facility/{facility_id}`, `POST /diagnostics/{id}/status`, `POST /diagnostics/{id}/result` → real diagnostic order/result workflow.
+- `POST /medicine-stock`, `GET /medicine-stock/facility/{facility_id}`, `POST /medicine-stock/{id}/adjust`, `GET /medicine-stock/{id}/movements` → real inventory; every quantity change writes an append-only `medicine_stock_movements` row.
+- `POST /follow-ups`, `GET /follow-ups/facility/{facility_id}?due_by=`, `GET /follow-ups/patient/{patient_id}`, `POST /follow-ups/{id}/status` → real follow-up scheduling.
+- `POST /teleconsults`, `GET /teleconsults/facility/{facility_id}`, `POST /teleconsults/{id}/media` (real multipart file upload), `GET /teleconsults/{id}/media` (real file download/playback), `POST /teleconsults/{id}/response` → real self-hosted store-and-forward teleconsult.
 
 ## AI service API (`services/ai`, FastAPI, port 8100)
 
@@ -208,6 +306,12 @@ never call Core or AI directly (matches the architecture diagram).
 - `POST /api/triage/extract` → proxies AI service; on `503`/network error, returns `{ai_unavailable: true}` so the client falls back to the on-device checklist evaluator
 - `POST /api/triage` → proxies Core `/triage` (used for both the LLM path, after `/api/triage/extract`, and the offline checklist path where the client already computed severity on-device)
 - `GET /api/queue/[facilityId]`, `GET /api/escalations/[facilityId]`, `POST /api/escalations/[id]/acknowledge`, `GET /api/dashboard/[facilityId]` → proxy Core
+- `POST /api/patients/[abha]/verify-scheme` → proxies Core; facility-side only, never surfaced to the ASHA app
+- `POST /api/referrals`, `GET /api/referrals/facility/[facilityId]`, `GET /api/referrals/patient/[patientId]`, `POST /api/referrals/[id]/status` → proxy Core
+- `POST /api/diagnostics`, `GET /api/diagnostics/facility/[facilityId]`, `POST /api/diagnostics/[id]/status`, `POST /api/diagnostics/[id]/result` → proxy Core
+- `POST /api/medicine-stock`, `GET /api/medicine-stock/facility/[facilityId]`, `POST /api/medicine-stock/[id]/adjust`, `GET /api/medicine-stock/[id]/movements` → proxy Core
+- `POST /api/follow-ups`, `GET /api/follow-ups/facility/[facilityId]`, `GET /api/follow-ups/patient/[patientId]`, `POST /api/follow-ups/[id]/status` → proxy Core
+- `POST /api/teleconsults`, `GET /api/teleconsults/facility/[facilityId]`, `POST /api/teleconsults/[id]/media`, `GET /api/teleconsults/[id]/media`, `POST /api/teleconsults/[id]/response` → proxy Core, including the real multipart file body
 
 ## Non-negotiables carried over from CLAUDE.md
 
@@ -218,5 +322,10 @@ never call Core or AI directly (matches the architecture diagram).
   set.
 - No cloud LLM, no hosted vector DB, nothing in the offline critical path
   that requires connectivity.
-- `MockAbdmClient` is the only ABDM integration point; it sits behind an
-  adapter interface in `services/core/adapters/`.
+- No mock features (2026-09-13 policy — see `CLAUDE.md`'s Non-negotiable
+  rule and `docs/REAL-INTEGRATION-AUDIT.md`). `AbdmGatewayClient` and
+  `NhaBeneficiaryClient` are real adapters built against the published
+  ABDM/PM-JAY API shapes, behind the `AbdmClient`/`SchemeVerificationClient`
+  interfaces in `services/core/app/adapters/`; both are honestly
+  "not configured" until real NHA credentials are supplied via env vars —
+  never fabricate a response in either adapter.

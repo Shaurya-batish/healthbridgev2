@@ -9,27 +9,45 @@ not with code.
 
 ## Non-negotiable rule
 
-Eight modules can't all be built for real in hackathon time — and shouldn't
-be. One real vertical spine, demoed end to end, beats eight shallow ones.
-Every mocked module sits behind an adapter interface so the mock is a
-swap-in later, not a rewrite.
+**No mock features (overrides the original "convincing mock" plan below,
+per the 2026-09-13 explicit product decision).** Every feature must be a
+real implementation: real Postgres-backed workflows for anything internal,
+and a real adapter built against the actual published API/spec for
+anything external — never fabricated data standing in for a call that
+never happened. `docs/REAL-INTEGRATION-AUDIT.md` is the living record of
+what's real, what's actually connected to its external service, what's
+tested, and what remains externally blocked (credentials/registration this
+project does not control). Nothing may be called "implemented" just
+because an adapter class exists, and nothing may be called "working" if it
+hasn't actually connected.
 
-### Build real
+### Real, no external dependency
 - Patient record — FHIR-shaped, keyed by ABHA number
 - Digital triage engine — LLM extraction + IMNCI rule table
 - Severity-based queue + red-case auto-escalation
-- Facility dashboard — 4 tiles, real system data only
+- Facility dashboard — tiles from real system data only
 - Offline-first ASHA app — PWA with local sync
+- Referral, diagnostics, medicine stock, follow-up — real Postgres-backed
+  workflows (own tables, real CRUD, real audit trail for stock movements)
+- Teleconsultation — real self-hosted store-and-forward (real uploaded
+  audio/video file, real checksum, real doctor playback and response) —
+  not live video infra, per the original architecture choice, but genuinely
+  functional, not a UI mock
 
-### Convincing mock, behind an adapter
-- Live ABDM gateway → `MockAbdmClient` returns sandbox-shaped FHIR bundles
-- Teleconsult video → store-and-forward only, no live infra
-- Scheme verification → a `scheme_status` badge, not an engine
-- Referral, diagnostics, medicine stock, follow-up → data screens only
+### Real adapter built, externally blocked (not fabricated, not fake)
+- ABDM gateway — real HIP-side client (session token, headers, care-context
+  discovery) against `AbdmGatewayClient`; **not connected** — requires NHA
+  HIP registration/certification this project does not have. Fails with a
+  clear "not configured" error; never fabricates a bundle.
+- Scheme verification — real PM-JAY BIS client shape (`NhaBeneficiaryClient`)
+  plus an honest `scheme_verification_status` (`unverified`/`verified`/
+  `failed`) distinct from the ASHA's self-reported scheme claim; **not
+  connected** — requires NHA hospital empanelment. Never silently marks
+  something "verified".
 
-**Scope creep — a mock quietly becoming a "real" build — is the top project
-risk.** This table is law. Under time pressure, cut in reverse order: mocks
-first, offline second, the triage spine never.
+See `docs/REAL-INTEGRATION-AUDIT.md` for the full per-feature breakdown,
+required credentials, and what's actually been tested vs. only unit-tested
+against the unconfigured/error path.
 
 ## System architecture
 
@@ -46,7 +64,10 @@ ASHA field app (PWA, offline queue)      Facility web (doctor/admin)
                  patients/queue/      Whisper -> Phi-4-mini -> rules
                  escalation                (returns severity only)
                     /      \
-          MockAbdmClient  Postgres --- Redis
+          AbdmGatewayClient  Postgres --- Redis
+          (real adapter, not
+           yet connected --
+           needs NHA HIP creds)
 ```
 
 - Both clients talk **only** to the gateway.
@@ -83,8 +104,13 @@ number**.
 | Observation | Symptoms and vitals captured at triage |
 
 **Relational tables:** `users`, `facilities`, `queue_tokens`,
-`triage_records`, `escalation_events`, `audit_log` — plus a single
-`scheme_status` enum (`PMJAY` / `state` / `none`) on Patient.
+`triage_records`, `escalation_events`, `audit_log`, `referrals`,
+`diagnostic_orders`, `medicine_stock` (+ `medicine_stock_movements`
+ledger), `follow_ups`, `teleconsults` — plus on Patient: a `scheme_status`
+enum (`PMJAY` / `state` / `none`, the ASHA's self-reported claim) and a
+separate `scheme_verification_status` enum (`unverified` / `pending` /
+`verified` / `failed`, only ever moved off `unverified` by a real NHA BIS
+call — see `docs/REAL-INTEGRATION-AUDIT.md`).
 
 ## Triage logic — the part judges will poke hardest
 
@@ -133,18 +159,20 @@ Build the spine thin end-to-end first, then widen — never take one module to
    queue length, teleconsults done, red cases escalated.
 5. **Day 2/3 — Offline:** ASHA flow works fully offline and syncs on
    reconnect. High demo payoff for the effort.
-6. **Day 3 — Mocks & polish:** teleconsult store-and-forward, scheme badge,
-   mock data screens, seeded demo patients, rehearsed script.
+6. **Day 3 — Real supporting workflows & polish:** teleconsult
+   store-and-forward, referral/diagnostics/medicine-stock/follow-up
+   (real Postgres-backed CRUD, not data screens), seeded demo patients,
+   rehearsed script.
 
 ## Top risks
 
 | Risk | Mitigation |
 |---|---|
-| Scope creep — mocks quietly become "real" builds | §Build-real/mock table is law; cut in reverse order under time pressure |
+| A team member fabricates a mock to make an external integration look done | Non-negotiable: §Non-negotiable rule + `docs/REAL-INTEGRATION-AUDIT.md` — every external feature must state real/connected/tested honestly |
 | Live demo fails on venue wifi | Recorded fallback video + seeded demo data; never demo cold on conference wifi |
 | A clinician judge challenges the triage | LLM-extracts-only + visible matched rule + audit log, shown live |
-| ABDM sandbox access is slow to obtain | Never on the critical path — `MockAbdmClient` from day one |
-| Teleconsult video becomes a rabbit hole | Capped at store-and-forward; video is not the headline feature |
+| ABDM/PM-JAY sandbox access requires real NHA registration, not obtainable mid-project | Real adapters built against the published spec, gated on env-var credentials; fail honestly (`abdm_not_configured` / `scheme_verification_not_configured`) rather than fabricate a response — never on the critical path |
+| Teleconsult video becomes a rabbit hole | Real self-hosted store-and-forward (upload/playback), not live video infra; video-call is out of scope |
 
 ## Development rules
 

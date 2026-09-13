@@ -37,6 +37,10 @@ pgdata/
 redisdata/
 docker-volumes/
 
+# --- Real patient-uploaded media (teleconsult store-and-forward) ---
+# Never committed: this is real patient audio/video, not test fixtures.
+services/core/data/
+
 # --- Local models / caches (Whisper, Ollama, HF) ---
 .ollama/
 models/

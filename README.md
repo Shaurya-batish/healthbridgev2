@@ -22,18 +22,31 @@ interface the three components are built against.
 `CLAUDE.md` is a working transcription of it for agent/dev use — if the two
 ever disagree, the PDF wins and `CLAUDE.md` should be corrected.
 
-## What's real vs. mocked
+## No mock features
 
-One real vertical spine, demoed end to end, beats eight shallow modules.
+Per an explicit 2026-09-13 product decision, this project does not ship
+mock/fabricated external integrations. Every feature is either a real
+implementation with no external dependency, or a real adapter built
+against the actual published API spec that is honestly marked as
+"not yet connected" when it requires credentials (NHA/ABDM registration)
+this project doesn't have. See
+[`docs/REAL-INTEGRATION-AUDIT.md`](./docs/REAL-INTEGRATION-AUDIT.md) for
+the full per-feature status.
 
-**Built real:** patient record (FHIR-shaped, keyed by ABHA number), digital
-triage engine (LLM extraction + IMNCI rule table), severity-based queue with
-red-case auto-escalation, facility dashboard (4 tiles, real data), offline-first
-ASHA app (PWA with local sync).
+**Real, fully working:** patient record (FHIR-shaped, keyed by ABHA
+number), digital triage engine (LLM extraction + IMNCI rule table),
+severity-based queue with red-case auto-escalation, facility dashboard
+(real data), offline-first ASHA app (PWA with local sync), referrals,
+diagnostics, medicine stock (real movement ledger), follow-up, and
+teleconsultation (real self-hosted store-and-forward: real uploaded
+audio/video, real playback).
 
-**Convincing mock, behind an adapter:** ABDM gateway (`MockAbdmClient`),
-teleconsult (store-and-forward only), scheme verification (a status badge),
-referral/diagnostics/medicine-stock/follow-up (data screens only).
+**Real adapter, externally blocked:** ABDM gateway integration and PM-JAY
+scheme verification — both require formal NHA registration (HIP
+certification / hospital empanelment) that cannot be completed inside a
+coding session. The adapters are built against the real API shapes and
+fail honestly (`abdm_not_configured` / `scheme_verification_not_configured`)
+rather than fabricate a response.
 
 ## Stack
 
@@ -54,10 +67,12 @@ referral/diagnostics/medicine-stock/follow-up (data screens only).
 3. **Queue & escalation:** severity-based reorder, RED auto-escalation.
 4. **Dashboard:** four real-data tiles.
 5. **Offline:** full ASHA flow offline, sync on reconnect.
-6. **Mocks & polish:** teleconsult, scheme badge, seeded demo data.
+6. **Supporting workflows:** referrals, diagnostics, medicine stock,
+   follow-up, teleconsult store-and-forward — all real, seeded demo data.
 
-If behind schedule, cut in reverse order — mocks first, offline second, the
-triage spine never.
+If behind schedule, cut in reverse order — supporting workflows first,
+offline second, the triage spine never. No feature may be cut to a fake
+stand-in; see `docs/REAL-INTEGRATION-AUDIT.md`.
 
 ## Project structure
 
@@ -65,7 +80,9 @@ triage spine never.
 apps/web/           Next.js (App Router, TS, Tailwind) — ASHA PWA + facility
                      web + the BFF/gateway (app/api/**), all in one app.
 services/core/       FastAPI. Owns Postgres. Patients, encounters, triage,
-                     queue, escalations, dashboard, audit log, MockAbdmClient.
+                     queue, escalations, dashboard, audit log, referrals,
+                     diagnostics, medicine stock, follow-up, teleconsult,
+                     the real (externally-blocked) ABDM/scheme adapters.
 services/ai/         FastAPI. Stateless. Whisper -> Phi-4-mini (Ollama, via
                      LangGraph) -> rule engine. Never touches Postgres.
 rules/               rules/imnci-rules.v1.json — the versioned IMNCI danger-
@@ -78,6 +95,9 @@ scripts/             Demo seed data (facilities/users SQL, and a Python
                      script that seeds patients through the real Core API).
 CONTRACT.md          Ports, env vars, DB schema, and API shapes the three
                      components above were built against.
+docs/                REAL-INTEGRATION-AUDIT.md — per-feature real vs.
+                     externally-blocked status; see CLAUDE.md's
+                     Non-negotiable rule.
 ```
 
 ## Getting started
