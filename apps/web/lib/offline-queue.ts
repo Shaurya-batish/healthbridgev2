@@ -96,7 +96,21 @@ async function postJson(endpoint: string, payload: unknown): Promise<{ ok: true;
   }
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
-  if (!res.ok) return { ok: false, networkError: false, status: res.status, body };
+  if (!res.ok) {
+    // The gateway itself is reachable but says the service behind it isn't
+    // (CONTRACT.md: /api/** returns 502 {detail: "core_unavailable"/"ai_unavailable"}
+    // when it can't reach Core/AI). That's the same situation as a network
+    // error for queueing purposes -- retry later, never discard the write.
+    // A real rejection (409 duplicate, 422 validation, 404) is a different
+    // HTTP status and still drops the queued item as before.
+    if (res.status === 502 && body && typeof body === "object" && "detail" in body) {
+      const detail = (body as { detail: unknown }).detail;
+      if (detail === "core_unavailable" || detail === "ai_unavailable") {
+        return { ok: false, networkError: true };
+      }
+    }
+    return { ok: false, networkError: false, status: res.status, body };
+  }
   return { ok: true, body };
 }
 

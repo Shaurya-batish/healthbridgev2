@@ -9,12 +9,13 @@ export function OfflineBanner() {
 
   return (
     <div
-      className={`sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-2 text-sm ${
+      className={`sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 text-base ${
         isOnline ? "bg-amber-100 text-amber-900" : "bg-slate-800 text-white"
       }`}
+      role="status"
     >
       <span>
-        {!isOnline && "Offline — your work is saved on this device. "}
+        {!isOnline && "Offline — your information is saved on this phone. "}
         {pendingCount > 0 && `${pendingCount} item${pendingCount === 1 ? "" : "s"} waiting to sync. `}
         {lastError && <span className="font-semibold">{lastError}</span>}
       </span>
@@ -22,7 +23,7 @@ export function OfflineBanner() {
         <button
           onClick={() => syncNow()}
           disabled={syncing}
-          className="whitespace-nowrap rounded bg-amber-900/10 px-2 py-1 text-xs font-semibold hover:bg-amber-900/20 disabled:opacity-50"
+          className="min-h-[44px] whitespace-nowrap rounded-lg bg-amber-900/10 px-4 text-base font-semibold hover:bg-amber-900/20 disabled:opacity-50"
         >
           {syncing ? "Syncing..." : "Sync now"}
         </button>

@@ -8,6 +8,7 @@ import {
   submitEncounterAndTriage,
   type SubmitOutcome,
 } from "./offline-queue";
+import { friendlyErrorMessage } from "./friendly-error";
 
 export interface OfflineSyncState {
   isOnline: boolean;
@@ -43,7 +44,7 @@ export function useOfflineSync(): OfflineSyncState {
     try {
       const result = await flushQueue();
       if (result.failed) {
-        setLastError(`A queued item was rejected by the server and dropped: ${JSON.stringify(result.failed.detail)}`);
+        setLastError(`One saved item couldn't be sent: ${friendlyErrorMessage(result.failed.detail, "please check it and try again.")}`);
       }
       await refreshPendingCount();
     } finally {
