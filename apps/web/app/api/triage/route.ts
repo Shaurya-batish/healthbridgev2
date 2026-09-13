@@ -1,25 +1,24 @@
 import { NextResponse } from "next/server";
 import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
-import { getSessionToken, verifySession } from "@/lib/auth";
+import { getSessionToken } from "@/lib/auth";
 
 // Persists a triage decision — used both for the LLM path (after
 // /api/triage/extract) and the offline checklist path where the client
 // already ran the on-device rules-engine. Core is the only writer.
+//
+// The audit log's actor is derived by Core itself from the verified
+// Authorization header (see services/core/app/routers/triage.py), never
+// from anything in this request body — that's what actually prevents an
+// actor-spoofing audit entry, not client-side omission.
 export async function POST(req: Request) {
   const body = await req.json();
-
-  // actor_user_id for the audit log must come from the verified session, never
-  // from client-supplied JSON — the client already omits it, but this closes
-  // off spoofing a different actor even if a future form starts sending one.
   const token = getSessionToken();
-  const session = token ? await verifySession(token) : null;
-  const payload = { ...body, actor_user_id: session?.sub ?? null };
 
   try {
     const result = await coreRequest("/triage", {
       method: "POST",
       headers: authHeader(token),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     return NextResponse.json(result, { status: 201 });
   } catch (err) {

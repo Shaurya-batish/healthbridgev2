@@ -65,3 +65,17 @@ def require_role(*roles: str):
         return user
 
     return _dependency
+
+
+CurrentUser = Annotated[TokenPayload, Depends(get_current_user)]
+
+
+def require_facility_access(user: TokenPayload, facility_id) -> None:
+    """Every facility-scoped read/write must call this. `admin` may reach
+    any facility; every other role may only reach its own -- an ASHA or
+    doctor token minted for facility A must never see or write facility
+    B's queue, escalations, dashboard, stock, etc."""
+    if user.role == "admin":
+        return
+    if user.facility_id is None or str(user.facility_id) != str(facility_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="facility_access_denied")

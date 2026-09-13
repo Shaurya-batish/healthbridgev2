@@ -13,12 +13,14 @@ from app.schemas import (
     MedicineStockMovementResponse,
     MedicineStockResponse,
 )
+from app.security import CurrentUser, require_facility_access
 
 router = APIRouter(prefix="/medicine-stock", tags=["medicine-stock"])
 
 
 @router.post("", response_model=MedicineStockResponse, status_code=status.HTTP_201_CREATED)
-def create_medicine_stock(payload: MedicineStockCreateRequest, db: Session = Depends(get_db)) -> MedicineStockResponse:
+def create_medicine_stock(payload: MedicineStockCreateRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> MedicineStockResponse:
+    require_facility_access(current_user, payload.facility_id)
     if payload.initial_quantity < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="initial_quantity_cannot_be_negative")
 
@@ -37,7 +39,7 @@ def create_medicine_stock(payload: MedicineStockCreateRequest, db: Session = Dep
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="medicine_already_stocked_at_facility") from exc
 
     if payload.initial_quantity > 0:
-        db.add(MedicineStockMovement(stock_id=stock.id, change_qty=payload.initial_quantity, reason="restock"))
+        db.add(MedicineStockMovement(stock_id=stock.id, change_qty=payload.initial_quantity, reason="restock", actor_user_id=uuid.UUID(current_user.user_id)))
 
     db.commit()
     db.refresh(stock)
@@ -45,7 +47,8 @@ def create_medicine_stock(payload: MedicineStockCreateRequest, db: Session = Dep
 
 
 @router.get("/facility/{facility_id}", response_model=list[MedicineStockResponse])
-def list_medicine_stock(facility_id: uuid.UUID, db: Session = Depends(get_db)) -> list[MedicineStockResponse]:
+def list_medicine_stock(facility_id: uuid.UUID, current_user: CurrentUser, db: Session = Depends(get_db)) -> list[MedicineStockResponse]:
+    require_facility_access(current_user, facility_id)
     items = db.scalars(
         select(MedicineStock).where(MedicineStock.facility_id == facility_id).order_by(MedicineStock.medicine_name)
     ).all()
@@ -54,7 +57,7 @@ def list_medicine_stock(facility_id: uuid.UUID, db: Session = Depends(get_db)) -
 
 @router.post("/{stock_id}/adjust", response_model=MedicineStockResponse)
 def adjust_medicine_stock(
-    stock_id: uuid.UUID, payload: MedicineStockAdjustRequest, db: Session = Depends(get_db)
+    stock_id: uuid.UUID, payload: MedicineStockAdjustRequest, current_user: CurrentUser, db: Session = Depends(get_db)
 ) -> MedicineStockResponse:
     """Real inventory movement -- quantity_on_hand only ever changes together
     with an append-only ledger row recording why, so the balance is always
@@ -62,6 +65,7 @@ def adjust_medicine_stock(
     stock = db.get(MedicineStock, stock_id)
     if stock is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="medicine_stock_not_found")
+    require_facility_access(current_user, stock.facility_id)
 
     new_quantity = stock.quantity_on_hand + payload.change_qty
     if new_quantity < 0:
@@ -73,7 +77,7 @@ def adjust_medicine_stock(
             stock_id=stock.id,
             change_qty=payload.change_qty,
             reason=payload.reason,
-            actor_user_id=payload.actor_user_id,
+            actor_user_id=uuid.UUID(current_user.user_id),
         )
     )
     db.commit()
@@ -82,7 +86,12 @@ def adjust_medicine_stock(
 
 
 @router.get("/{stock_id}/movements", response_model=list[MedicineStockMovementResponse])
-def list_stock_movements(stock_id: uuid.UUID, db: Session = Depends(get_db)) -> list[MedicineStockMovementResponse]:
+def list_stock_movements(stock_id: uuid.UUID, current_user: CurrentUser, db: Session = Depends(get_db)) -> list[MedicineStockMovementResponse]:
+    stock = db.get(MedicineStock, stock_id)
+    if stock is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="medicine_stock_not_found")
+    require_facility_access(current_user, stock.facility_id)
+
     movements = db.scalars(
         select(MedicineStockMovement)
         .where(MedicineStockMovement.stock_id == stock_id)

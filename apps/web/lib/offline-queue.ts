@@ -203,8 +203,26 @@ export interface FlushResult {
   failed?: { detail: unknown };
 }
 
+// Two calls to flushQueue() firing close together (mount's initial sync and
+// an 'online' event, or a double-tap on "Sync now" before the button's
+// disabled state re-renders) used to both read the same pending list and
+// both POST the same operation -- a real double-submission bug (confirmed:
+// duplicate patient/encounter/triage writes). `syncing` React state alone
+// isn't a synchronous guard against this, so the lock lives here instead:
+// a second concurrent call gets back the SAME in-flight promise rather than
+// starting its own pass over the queue.
+let inFlightFlush: Promise<FlushResult> | null = null;
+
+export function flushQueue(): Promise<FlushResult> {
+  if (inFlightFlush) return inFlightFlush;
+  inFlightFlush = _flushQueue().finally(() => {
+    inFlightFlush = null;
+  });
+  return inFlightFlush;
+}
+
 /** Replays every queued operation in FIFO order. Stops at the first thing that still can't reach the network. */
-export async function flushQueue(): Promise<FlushResult> {
+async function _flushQueue(): Promise<FlushResult> {
   const pending = await listPending();
   let flushed = 0;
 

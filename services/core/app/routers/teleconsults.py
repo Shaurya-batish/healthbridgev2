@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import Teleconsult
 from app.schemas import TeleconsultCreateRequest, TeleconsultResponse, TeleconsultResponseRequest
+from app.security import CurrentUser, require_facility_access
 
 router = APIRouter(prefix="/teleconsults", tags=["teleconsults"])
 
@@ -26,6 +27,7 @@ _ALLOWED_CONTENT_TYPES = {
     "video/webm": ".webm",
     "video/mp4": ".mp4",
 }
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def _media_dir(teleconsult_id: uuid.UUID) -> Path:
@@ -36,12 +38,13 @@ def _media_dir(teleconsult_id: uuid.UUID) -> Path:
 
 
 @router.post("", response_model=TeleconsultResponse, status_code=status.HTTP_201_CREATED)
-def create_teleconsult(payload: TeleconsultCreateRequest, db: Session = Depends(get_db)) -> TeleconsultResponse:
+def create_teleconsult(payload: TeleconsultCreateRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> TeleconsultResponse:
+    require_facility_access(current_user, payload.facility_id)
     teleconsult = Teleconsult(
         encounter_id=payload.encounter_id,
         patient_id=payload.patient_id,
         facility_id=payload.facility_id,
-        requested_by_user_id=payload.requested_by_user_id,
+        requested_by_user_id=uuid.UUID(current_user.user_id),
     )
     db.add(teleconsult)
     db.commit()
@@ -50,7 +53,8 @@ def create_teleconsult(payload: TeleconsultCreateRequest, db: Session = Depends(
 
 
 @router.get("/facility/{facility_id}", response_model=list[TeleconsultResponse])
-def list_teleconsults(facility_id: uuid.UUID, db: Session = Depends(get_db)) -> list[TeleconsultResponse]:
+def list_teleconsults(facility_id: uuid.UUID, current_user: CurrentUser, db: Session = Depends(get_db)) -> list[TeleconsultResponse]:
+    require_facility_access(current_user, facility_id)
     items = db.scalars(
         select(Teleconsult).where(Teleconsult.facility_id == facility_id).order_by(Teleconsult.created_at.desc())
     ).all()
@@ -59,7 +63,7 @@ def list_teleconsults(facility_id: uuid.UUID, db: Session = Depends(get_db)) -> 
 
 @router.post("/{teleconsult_id}/media", response_model=TeleconsultResponse)
 async def upload_teleconsult_media(
-    teleconsult_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)
+    teleconsult_id: uuid.UUID, current_user: CurrentUser, file: UploadFile = File(...), db: Session = Depends(get_db)
 ) -> TeleconsultResponse:
     """Writes the REAL uploaded bytes to disk and records a real sha256
     checksum -- this is what "real" means for store-and-forward: an
@@ -67,6 +71,7 @@ async def upload_teleconsult_media(
     teleconsult = db.get(Teleconsult, teleconsult_id)
     if teleconsult is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="teleconsult_not_found")
+    require_facility_access(current_user, teleconsult.facility_id)
 
     content_type = file.content_type or ""
     if content_type not in _ALLOWED_CONTENT_TYPES:
@@ -75,7 +80,12 @@ async def upload_teleconsult_media(
             detail=f"unsupported_media_type: {content_type or 'unknown'}",
         )
 
-    body = await file.read()
+    max_bytes = get_settings().teleconsult_max_upload_bytes
+    body = bytearray()
+    while chunk := await file.read(_UPLOAD_CHUNK_SIZE):
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="upload_too_large")
     if not body:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_upload")
 
@@ -96,10 +106,11 @@ async def upload_teleconsult_media(
 
 
 @router.get("/{teleconsult_id}/media")
-def download_teleconsult_media(teleconsult_id: uuid.UUID, db: Session = Depends(get_db)) -> FileResponse:
+def download_teleconsult_media(teleconsult_id: uuid.UUID, current_user: CurrentUser, db: Session = Depends(get_db)) -> FileResponse:
     teleconsult = db.get(Teleconsult, teleconsult_id)
     if teleconsult is None or not teleconsult.media_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="teleconsult_media_not_found")
+    require_facility_access(current_user, teleconsult.facility_id)
 
     path = Path(teleconsult.media_path)
     if not path.is_file():
@@ -110,11 +121,12 @@ def download_teleconsult_media(teleconsult_id: uuid.UUID, db: Session = Depends(
 
 @router.post("/{teleconsult_id}/response", response_model=TeleconsultResponse)
 def record_doctor_response(
-    teleconsult_id: uuid.UUID, payload: TeleconsultResponseRequest, db: Session = Depends(get_db)
+    teleconsult_id: uuid.UUID, payload: TeleconsultResponseRequest, current_user: CurrentUser, db: Session = Depends(get_db)
 ) -> TeleconsultResponse:
     teleconsult = db.get(Teleconsult, teleconsult_id)
     if teleconsult is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="teleconsult_not_found")
+    require_facility_access(current_user, teleconsult.facility_id)
     if teleconsult.status != "recorded":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="no_recording_to_respond_to")
 

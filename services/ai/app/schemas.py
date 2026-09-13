@@ -6,7 +6,17 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model
+
+# A caregiver's spoken/typed complaint has no legitimate reason to be huge;
+# an unbounded string gets forwarded straight into an LLM prompt run on
+# "modest PHC hardware" (CLAUDE.md) -- an extremely long input is both a
+# resource-exhaustion and a slow-request risk. 4000 chars is generous for
+# a free-text complaint. audio_base64 is capped similarly (~11MB of raw
+# audio at base64's ~4/3 size overhead) -- enough for several minutes of
+# voice, not an arbitrarily large upload.
+_MAX_COMPLAINT_CHARS = 4000
+_MAX_AUDIO_BASE64_CHARS = 15_000_000
 
 from .rules_engine import load_rules
 
@@ -67,8 +77,8 @@ def coerce_to_fact_schema(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 class ExtractRequest(BaseModel):
-    complaint_text: Optional[str] = None
-    audio_base64: Optional[str] = None
+    complaint_text: Optional[str] = Field(default=None, max_length=_MAX_COMPLAINT_CHARS)
+    audio_base64: Optional[str] = Field(default=None, max_length=_MAX_AUDIO_BASE64_CHARS)
     age_months: Optional[float] = None
 
 

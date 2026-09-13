@@ -1,13 +1,18 @@
-import { authHeader, coreRequest } from "@/lib/api-client";
-import { getSessionToken } from "@/lib/auth";
 import { requireFacilitySession } from "@/lib/server-session";
+import { safeCoreRequest } from "@/lib/facility-data";
+import { FacilityUnavailable } from "@/components/FacilityUnavailable";
 import type { DashboardTiles } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export default async function FacilityDashboardPage() {
   const session = await requireFacilitySession();
-  const tiles = (await coreRequest(`/dashboard/${session.facility_id}`, {
-    headers: authHeader(getSessionToken()),
-  })) as DashboardTiles;
+  const result = await safeCoreRequest<DashboardTiles>(`/dashboard/${session.facility_id}`);
+
+  if (!result.ok) {
+    return <FacilityUnavailable reason={result.reason} />;
+  }
+  const tiles = result.data;
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

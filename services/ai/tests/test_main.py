@@ -68,3 +68,22 @@ def test_extract_with_audio_returns_503_when_transcription_unavailable(monkeypat
     resp = client.post("/triage/extract", json={"audio_base64": "ZmFrZQ=="})
     assert resp.status_code == 503
     assert resp.json()["detail"] == "ai_unavailable"
+
+
+def test_extract_rejects_extremely_long_complaint_text():
+    """Regression test: an unbounded complaint_text used to be forwarded
+    straight into an LLM prompt with no size limit at all -- a real
+    resource-exhaustion risk on "modest PHC hardware" (CLAUDE.md)."""
+    resp = client.post("/triage/extract", json={"complaint_text": "a" * 5000})
+    assert resp.status_code == 422
+
+
+def test_extract_rejects_oversized_audio_base64():
+    resp = client.post("/triage/extract", json={"audio_base64": "a" * 20_000_000})
+    assert resp.status_code == 422
+
+
+def test_extract_accepts_complaint_text_at_the_limit(monkeypatch):
+    monkeypatch.setattr(main, "run_extraction", lambda **kwargs: {})
+    resp = client.post("/triage/extract", json={"complaint_text": "a" * 4000})
+    assert resp.status_code == 200

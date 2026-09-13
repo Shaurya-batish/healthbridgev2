@@ -70,6 +70,23 @@ def test_download_returns_the_real_uploaded_bytes(client):
     assert res.content == audio_bytes
 
 
+def test_oversized_upload_is_rejected_not_read_fully_into_memory(client, monkeypatch):
+    """Regression test: uploads used to be read fully into memory with no
+    size check at all -- a real DoS vector. TELECONSULT_MAX_UPLOAD_BYTES is
+    set tiny here so the test doesn't need to actually send 25MB."""
+    monkeypatch.setenv("TELECONSULT_MAX_UPLOAD_BYTES", "100")
+    get_settings.cache_clear()
+
+    teleconsult = _create_teleconsult(client)
+    oversized = b"x" * 1000
+    res = client.post(
+        f"/teleconsults/{teleconsult['id']}/media",
+        files={"file": ("recording.webm", oversized, "audio/webm")},
+    )
+    assert res.status_code == 413
+    assert res.json()["detail"] == "upload_too_large"
+
+
 def test_unsupported_content_type_rejected(client):
     teleconsult = _create_teleconsult(client)
     res = client.post(

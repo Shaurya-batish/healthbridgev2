@@ -1,6 +1,8 @@
 import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
 import { getSessionToken } from "@/lib/auth";
 import { requireFacilitySession } from "@/lib/server-session";
+import { safeCoreRequest } from "@/lib/facility-data";
+import { FacilityUnavailable } from "@/components/FacilityUnavailable";
 import { SchemeBadge } from "@/components/SchemeBadge";
 import type { Encounter, Patient } from "@/lib/types";
 import { VerifySchemeButton } from "./VerifySchemeButton";
@@ -15,20 +17,19 @@ type AbdmStatus = "linked" | "not_configured" | "unavailable" | "not_found";
 export default async function FacilityPatientPage({ params }: { params: { abha: string } }) {
   const session = await requireFacilitySession();
   const token = getSessionToken();
-  let patient: (Patient & { encounters?: Encounter[] }) | null = null;
   let abdmStatus: AbdmStatus = "not_found";
 
-  try {
-    patient = (await coreRequest(`/patients/${encodeURIComponent(params.abha)}`, {
-      headers: authHeader(token),
-    })) as Patient & { encounters?: Encounter[] };
-  } catch (err) {
-    if (!(err instanceof UpstreamError && err.status === 404)) throw err;
-  }
+  const patientResult = await safeCoreRequest<Patient & { encounters?: Encounter[] }>(
+    `/patients/${encodeURIComponent(params.abha)}`,
+  );
 
-  if (!patient) {
+  if (!patientResult.ok && patientResult.reason === "not_found") {
     return <p className="text-sm text-slate-500">No patient found for ABHA number {params.abha}.</p>;
   }
+  if (!patientResult.ok) {
+    return <FacilityUnavailable reason={patientResult.reason} />;
+  }
+  const patient = patientResult.data;
 
   try {
     await coreRequest(`/abdm/patient/${encodeURIComponent(params.abha)}`, { headers: authHeader(token) });

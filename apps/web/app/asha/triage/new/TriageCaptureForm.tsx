@@ -67,7 +67,13 @@ export function TriageCaptureForm({ abhaNumber, facilityId }: { abhaNumber: stri
       });
       const body = await res.json();
 
-      if (body.ai_unavailable) {
+      // Defense in depth: never trust a response that doesn't actually
+      // carry a valid severity, whatever the reason (a bug, a network
+      // proxy mangling the body, an AI-service schema drift). Anything
+      // short of a clean result falls back to the checklist, same as an
+      // explicit ai_unavailable signal — the checklist path is always safe.
+      const validSeverities = ["RED", "YELLOW", "GREEN"];
+      if (body.ai_unavailable || !validSeverities.includes(body.severity) || typeof body.rule_id !== "string") {
         setStage("checklist");
         return;
       }

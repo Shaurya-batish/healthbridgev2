@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Encounter, EscalationEvent, QueueToken, Teleconsult, TriageRecord
 from app.schemas import DashboardResponse
+from app.security import CurrentUser, require_facility_access
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/{facility_id}", response_model=DashboardResponse)
-def get_dashboard(facility_id: uuid.UUID, db: Session = Depends(get_db)) -> DashboardResponse:
+def get_dashboard(facility_id: uuid.UUID, current_user: CurrentUser, db: Session = Depends(get_db)) -> DashboardResponse:
+    require_facility_access(current_user, facility_id)
     severity_counts = dict(
         db.execute(
             select(TriageRecord.severity, func.count())

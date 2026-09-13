@@ -63,7 +63,9 @@ class TriageRequest(BaseModel):
     severity: Severity
     rule_id: str
     rule_version: str
-    actor_user_id: uuid.UUID | None = None
+    # No actor_user_id here -- a client-supplied actor would let anyone
+    # attribute a triage decision to someone else in the audit log. The
+    # router derives it from the authenticated session instead.
 
 
 class TriageRecordResponse(BaseModel):
@@ -188,7 +190,7 @@ class MedicineStockCreateRequest(BaseModel):
 class MedicineStockAdjustRequest(BaseModel):
     change_qty: int
     reason: StockMovementReasonT
-    actor_user_id: uuid.UUID | None = None
+    # No actor_user_id here -- same reasoning as TriageRequest above.
 
 
 class MedicineStockResponse(BaseModel):
@@ -239,7 +241,8 @@ class TeleconsultCreateRequest(BaseModel):
     encounter_id: uuid.UUID
     patient_id: uuid.UUID
     facility_id: uuid.UUID
-    requested_by_user_id: uuid.UUID | None = None
+    # No requested_by_user_id here -- derived from the authenticated
+    # session, same reasoning as TriageRequest.actor_user_id above.
 
 
 class TeleconsultResponseRequest(BaseModel):

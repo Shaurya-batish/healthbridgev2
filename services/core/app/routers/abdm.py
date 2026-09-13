@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 
 from app.adapters.abdm_client import AbdmClient, AbdmGatewayClient, AbdmNotConfiguredError, AbdmUnavailableError
+from app.security import CurrentUser
 
 router = APIRouter(prefix="/abdm", tags=["abdm"])
 
@@ -11,7 +12,7 @@ _client: AbdmClient = AbdmGatewayClient()
 
 
 @router.get("/patient/{abha_number}")
-def get_abdm_patient_bundle(abha_number: str) -> dict:
+def get_abdm_patient_bundle(abha_number: str, current_user: CurrentUser) -> dict:
     try:
         return _client.fetch_patient_bundle(abha_number)
     except AbdmNotConfiguredError as exc:

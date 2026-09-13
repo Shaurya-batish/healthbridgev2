@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -103,6 +104,11 @@ class Observation(Base):
 
 class QueueToken(Base):
     __tablename__ = "queue_tokens"
+    # Defense in depth alongside the FOR UPDATE lock in
+    # routers/encounters.py: even if some future code path allocates a
+    # token number without taking that lock, the DB itself refuses two
+    # tokens with the same number at the same facility.
+    __table_args__ = (UniqueConstraint("facility_id", "token_number", name="uq_queue_tokens_facility_token_number"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     encounter_id: Mapped[uuid.UUID] = mapped_column(

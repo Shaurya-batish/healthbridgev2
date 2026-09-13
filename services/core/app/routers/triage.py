@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.redis_client import publish_escalation
 from app.schemas import TriageRecordResponse, TriageRequest, TriageResponse
+from app.security import CurrentUser, require_facility_access
 
 router = APIRouter(prefix="/triage", tags=["triage"])
 
@@ -39,7 +40,7 @@ def _queue_position(db: Session, facility_id: uuid.UUID, token: QueueToken) -> i
 
 
 @router.post("", response_model=TriageResponse, status_code=status.HTTP_201_CREATED)
-def submit_triage(payload: TriageRequest, db: Session = Depends(get_db)) -> TriageResponse:
+def submit_triage(payload: TriageRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> TriageResponse:
     """The audit-critical write path.
 
     Every call -- regardless of severity, regardless of source (LLM or
@@ -51,6 +52,7 @@ def submit_triage(payload: TriageRequest, db: Session = Depends(get_db)) -> Tria
     encounter = db.get(Encounter, payload.encounter_id)
     if encounter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
+    require_facility_access(current_user, encounter.facility_id)
 
     observation = Observation(
         encounter_id=encounter.id,
@@ -107,7 +109,7 @@ def submit_triage(payload: TriageRequest, db: Session = Depends(get_db)) -> Tria
 
     db.add(
         AuditLog(
-            actor_user_id=payload.actor_user_id,
+            actor_user_id=uuid.UUID(current_user.user_id),
             action="triage_decision",
             entity_type="triage_record",
             entity_id=triage_record.id,

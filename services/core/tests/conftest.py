@@ -16,6 +16,8 @@ import os
 
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
+import uuid
+
 import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
@@ -25,8 +27,26 @@ from sqlalchemy.pool import StaticPool
 from app.db import get_db
 from app.main import app
 from app.models import DiagnosticOrder, FollowUp, MedicineStock, MedicineStockMovement, Referral, Teleconsult
+from app.security import create_access_token
 
 NEW_MODELS = (Referral, DiagnosticOrder, MedicineStock, MedicineStockMovement, FollowUp, Teleconsult)
+
+
+def mint_token(role: str = "admin", facility_id: uuid.UUID | None = None) -> str:
+    """Mints a real JWT the same way Core's own /auth/login does (same
+    function, same secret) -- no DB/user row needed since
+    create_access_token is pure. Default role is admin so the bulk of the
+    functional test suite (business logic, not authorization) can keep
+    using arbitrary random facility ids without every call needing to
+    match one fixed facility -- admin intentionally bypasses the
+    facility-scoping check (see app/security.py::require_facility_access).
+    Authorization itself is regression-tested separately in
+    test_authorization.py with non-admin roles."""
+    return create_access_token(uuid.uuid4(), role, facility_id)
+
+
+def auth_headers(role: str = "admin", facility_id: uuid.UUID | None = None) -> dict[str, str]:
+    return {"Authorization": f"Bearer {mint_token(role, facility_id)}"}
 
 
 @pytest.fixture
@@ -56,5 +76,7 @@ def client(db_engine):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    test_client = TestClient(app)
+    test_client.headers.update(auth_headers())  # admin by default -- see mint_token docstring
+    yield test_client
     app.dependency_overrides.clear()

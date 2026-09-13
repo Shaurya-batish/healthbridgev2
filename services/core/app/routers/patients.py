@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.scheme_verification_client import (
@@ -14,6 +15,7 @@ from app.db import get_db
 from app.fhir import build_patient_resource
 from app.models import Encounter, Patient
 from app.schemas import PatientCreateRequest, PatientDetailResponse, PatientResponse, SchemeVerificationResponse
+from app.security import CurrentUser
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
@@ -23,7 +25,7 @@ _scheme_client: SchemeVerificationClient = NhaBeneficiaryClient()
 
 
 @router.post("", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
-def create_patient(payload: PatientCreateRequest, db: Session = Depends(get_db)) -> PatientResponse:
+def create_patient(payload: PatientCreateRequest, current_user: CurrentUser, db: Session = Depends(get_db)) -> PatientResponse:
     existing = db.scalar(select(Patient).where(Patient.abha_number == payload.abha_number))
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="abha_number_already_registered")
@@ -43,13 +45,23 @@ def create_patient(payload: PatientCreateRequest, db: Session = Depends(get_db))
         fhir=fhir,
     )
     db.add(patient)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # The pre-check above is a TOCTOU race, not a guarantee: two
+        # concurrent registrations for the same ABHA number can both pass
+        # it before either commits. The unique constraint on abha_number
+        # is what actually prevents the duplicate write; this turns that
+        # into the same clean 409 the pre-check gives, instead of an
+        # unhandled 500 with a raw DB error leaking to the client.
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="abha_number_already_registered") from exc
     db.refresh(patient)
     return PatientResponse.model_validate(patient, from_attributes=True)
 
 
 @router.get("/{abha_number}", response_model=PatientDetailResponse)
-def get_patient(abha_number: str, db: Session = Depends(get_db)) -> PatientDetailResponse:
+def get_patient(abha_number: str, current_user: CurrentUser, db: Session = Depends(get_db)) -> PatientDetailResponse:
     patient = db.scalar(select(Patient).where(Patient.abha_number == abha_number))
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="patient_not_found")
@@ -65,7 +77,7 @@ def get_patient(abha_number: str, db: Session = Depends(get_db)) -> PatientDetai
 
 
 @router.post("/{abha_number}/verify-scheme", response_model=SchemeVerificationResponse)
-def verify_scheme(abha_number: str, db: Session = Depends(get_db)) -> SchemeVerificationResponse:
+def verify_scheme(abha_number: str, current_user: CurrentUser, db: Session = Depends(get_db)) -> SchemeVerificationResponse:
     """Attempts a REAL PM-JAY/state-scheme verification call. Never fabricates
     a "verified" result -- if NHA operator credentials aren't configured,
     this honestly reports 501 rather than flipping the status."""

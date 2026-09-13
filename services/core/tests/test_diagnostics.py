@@ -22,6 +22,7 @@ from sqlalchemy.pool import StaticPool
 from app.db import get_db
 from app.main import app
 from app.models import DiagnosticOrder
+from tests.conftest import auth_headers
 
 
 @pytest.fixture
@@ -50,7 +51,9 @@ def client(db_engine):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app), session_factory
+    test_client = TestClient(app)
+    test_client.headers.update(auth_headers())
+    yield test_client, session_factory
     app.dependency_overrides.clear()
 
 
