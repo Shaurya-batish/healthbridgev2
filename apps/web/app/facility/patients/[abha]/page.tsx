@@ -4,7 +4,7 @@ import { requireFacilitySession } from "@/lib/server-session";
 import { safeCoreRequest } from "@/lib/facility-data";
 import { FacilityUnavailable } from "@/components/FacilityUnavailable";
 import { SchemeBadge } from "@/components/SchemeBadge";
-import type { Encounter, Patient } from "@/lib/types";
+import type { PatientDetail } from "@/lib/types";
 import { VerifySchemeButton } from "./VerifySchemeButton";
 import { PatientActionForms } from "./PatientActionForms";
 
@@ -19,7 +19,7 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
   const token = getSessionToken();
   let abdmStatus: AbdmStatus = "not_found";
 
-  const patientResult = await safeCoreRequest<Patient & { encounters?: Encounter[] }>(
+  const patientResult = await safeCoreRequest<PatientDetail>(
     `/patients/${encodeURIComponent(params.abha)}`,
   );
 
@@ -29,7 +29,10 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
   if (!patientResult.ok) {
     return <FacilityUnavailable reason={patientResult.reason} />;
   }
-  const patient = patientResult.data;
+  // Core returns { patient, encounters } -- unwrap it; reading fhir/
+  // abha_number off the envelope threw and 500'd the whole page.
+  const { patient } = patientResult.data;
+  const encounters = patientResult.data.encounters ?? [];
 
   try {
     await coreRequest(`/abdm/patient/${encodeURIComponent(params.abha)}`, { headers: authHeader(token) });
@@ -88,9 +91,9 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
 
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-slate-700">Visit history</h2>
-        {!patient.encounters?.length && <p className="mt-2 text-sm text-slate-400">No visits recorded yet.</p>}
+        {!encounters.length && <p className="mt-2 text-sm text-slate-400">No visits recorded yet.</p>}
         <ul className="mt-2 divide-y divide-slate-100">
-          {patient.encounters?.map((enc) => (
+          {encounters.map((enc) => (
             <li key={enc.id} className="py-2 text-sm text-slate-600">
               {new Date(enc.created_at).toLocaleString()}
             </li>
@@ -98,10 +101,10 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
         </ul>
       </div>
 
-      {patient.encounters && patient.encounters.length > 0 && (
+      {encounters.length > 0 && (
         <PatientActionForms
           patientId={patient.id}
-          encounterId={patient.encounters[0].id}
+          encounterId={encounters[0].id}
           facilityId={session.facility_id}
         />
       )}

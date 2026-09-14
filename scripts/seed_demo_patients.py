@@ -97,7 +97,14 @@ def call(method, path, body=None, token=None):
 
 def main():
     print(f"Seeding demo patients against {CORE_URL} ...")
-    login = call("POST", "/auth/login", {"username": "asha1", "password": "asha-demo-pass"})
+    # admin1, not asha1: the demo cases are seeded into the PHC
+    # (PHC_FACILITY_ID) so doctor1 -- who is attached to the PHC -- sees them
+    # in the queue and dashboard. asha1 is attached to the sub-centre, and
+    # require_facility_access() correctly refuses a non-admin token writing
+    # into another facility, so seeding as asha1 returned 403 on every
+    # /encounters call. admin is the only role permitted to write across
+    # facilities, which is what a seeding script is.
+    login = call("POST", "/auth/login", {"username": "admin1", "password": "admin-demo-pass"})
     token = login["token"]
 
     for case in DEMO_CASES:

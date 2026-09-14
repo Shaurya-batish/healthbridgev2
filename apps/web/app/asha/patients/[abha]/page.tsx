@@ -3,19 +3,19 @@ import { getSessionToken } from "@/lib/auth";
 import { SchemeBadge } from "@/components/SchemeBadge";
 import { AshaButton } from "@/components/asha/AshaButton";
 import { IconArrowRight, IconAlertTriangle } from "@/components/asha/icons";
-import type { Encounter, Patient } from "@/lib/types";
+import type { PatientDetail } from "@/lib/types";
 
 export default async function AshaPatientPage({ params }: { params: { abha: string } }) {
-  let patient: (Patient & { encounters?: Encounter[] }) | null = null;
+  let detail: PatientDetail | null = null;
   let unreachable = false;
 
   try {
-    patient = (await coreRequest(`/patients/${encodeURIComponent(params.abha)}`, {
+    detail = (await coreRequest(`/patients/${encodeURIComponent(params.abha)}`, {
       headers: authHeader(getSessionToken()),
-    })) as Patient & { encounters?: Encounter[] };
+    })) as PatientDetail;
   } catch (err) {
     if (err instanceof UpstreamError && err.status === 404) {
-      patient = null;
+      detail = null;
     } else {
       unreachable = true;
     }
@@ -35,7 +35,7 @@ export default async function AshaPatientPage({ params }: { params: { abha: stri
     );
   }
 
-  if (!patient) {
+  if (!detail) {
     return (
       <div className="space-y-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-600">
@@ -47,6 +47,9 @@ export default async function AshaPatientPage({ params }: { params: { abha: stri
       </div>
     );
   }
+
+  const { patient } = detail;
+  const encounters = detail.encounters ?? [];
 
   return (
     <div className="space-y-4">
@@ -76,9 +79,9 @@ export default async function AshaPatientPage({ params }: { params: { abha: stri
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-base font-semibold text-slate-700">Past Visits</h2>
-        {!patient.encounters?.length && <p className="mt-2 text-slate-500">No visits recorded yet.</p>}
+        {!encounters.length && <p className="mt-2 text-slate-500">No visits recorded yet.</p>}
         <ul className="mt-2 divide-y divide-slate-100">
-          {patient.encounters?.map((enc) => (
+          {encounters.map((enc) => (
             <li key={enc.id} className="py-2 text-base text-slate-600">
               {new Date(enc.created_at).toLocaleString()}
             </li>

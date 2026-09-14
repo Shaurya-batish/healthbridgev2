@@ -67,6 +67,15 @@ export interface Patient {
   updated_at: string;
 }
 
+/** Response shape of Core's GET /patients/{abha_number} -- an envelope,
+ * not a flat Patient (CONTRACT.md: "FHIR Patient + list of Encounters").
+ * Reading `.fhir` / `.abha_number` straight off this object is what made
+ * both patient detail pages throw. */
+export interface PatientDetail {
+  patient: Patient;
+  encounters: Encounter[];
+}
+
 export interface Encounter {
   id: string;
   patient_id: string;

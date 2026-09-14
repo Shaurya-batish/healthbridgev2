@@ -5,6 +5,11 @@ const KNOWN_MESSAGES: Record<string, string> = {
   abha_number_already_registered: "A patient with this ABHA number is already registered. Try Find Patient instead.",
   patient_not_found: "No patient found with this ABHA number. Check the number, or register a new patient.",
   facility_not_found: "Your account isn't linked to a facility. Ask an admin to fix this before continuing.",
+  // Sign-in failures reach the very first screen an ASHA sees, so the raw
+  // code from Core must never be the visible text (CLAUDE.md ASHA UX rule 10).
+  invalid_credentials: "That username or password isn't right. Check them and try again.",
+  login_failed: "Sign-in didn't work. Check your username and password and try again.",
+  missing_credentials: "Enter your username and password to sign in.",
   // These codes only ever reach friendlyErrorMessage on a REJECTED submit
   // (offline-queue.ts already handles the "queued for later" case separately
   // and never calls this function for it) -- so wording here must not claim

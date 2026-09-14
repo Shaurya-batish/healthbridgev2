@@ -21,7 +21,7 @@ export function RegisterPatientForm({ initialAbha = "" }: { initialAbha?: string
     gender: "female",
     scheme_status: "none" as SchemeStatus,
   });
-  const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "saving" | "error" | "queued">("idle");
   const [error, setError] = useState<string | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
 
@@ -58,7 +58,42 @@ export function RegisterPatientForm({ initialAbha = "" }: { initialAbha?: string
       return;
     }
 
+    // Only navigate when the patient actually reached the server. The detail
+    // page is server-rendered, so with no connectivity it is either missing
+    // from the service-worker cache (the ASHA lands on the browser's own
+    // error page and cannot tell whether her work was saved) or it reports
+    // "no patient found" for the record she just entered. When the write is
+    // queued locally, confirm it in place instead -- the same shape the
+    // triage flow already uses for a queued save.
+    if (result.status === "queued") {
+      setStatus("queued");
+      return;
+    }
+
     router.push(`/asha/patients/${encodeURIComponent(form.abha_number)}`);
+  }
+
+  if (status === "queued") {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 rounded-2xl border border-severity-green bg-severity-green-bg p-5 text-severity-green">
+          <IconCheckCircle className="mt-0.5 h-7 w-7 shrink-0" />
+          <div>
+            <p className="text-xl font-bold">Saved on this phone</p>
+            <p className="mt-1 text-base font-medium">
+              {form.name} is saved here and will sync automatically when you have signal. You do not need to enter this patient again.
+            </p>
+          </div>
+        </div>
+        {/* Home is the one route the service worker reliably has cached, so it
+            is the only navigation offered here. /asha/triage/new?abha=... is
+            server-rendered per ABHA and would be a cache miss with no signal --
+            exactly the dead end this panel exists to avoid. */}
+        <AshaButton href="/asha" icon={<IconArrowRight />}>
+          Back to Home
+        </AshaButton>
+      </div>
+    );
   }
 
   return (

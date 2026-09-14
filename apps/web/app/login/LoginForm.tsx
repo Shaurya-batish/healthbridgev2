@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { friendlyErrorMessage } from "@/lib/friendly-error";
 
 export function LoginForm() {
   const router = useRouter();
@@ -25,7 +26,9 @@ export function LoginForm() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setError(body.detail ?? "Login failed. Check your username and password.");
+        // Never surface Core's raw error code (e.g. "invalid_credentials")
+        // to the user -- map it to a plain sentence first.
+        setError(friendlyErrorMessage(body, "Sign-in didn't work. Check your username and password and try again."));
         return;
       }
 

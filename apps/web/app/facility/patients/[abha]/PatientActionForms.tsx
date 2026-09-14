@@ -95,6 +95,7 @@ function ReferralForm({ patientId, encounterId, facilityId }: Props) {
       <form onSubmit={onSubmit} className="space-y-2">
         <input
           required
+          aria-label="Destination facility ID"
           placeholder="Destination facility ID"
           value={toFacility}
           onChange={(e) => setToFacility(e.target.value)}
@@ -102,6 +103,7 @@ function ReferralForm({ patientId, encounterId, facilityId }: Props) {
         />
         <input
           required
+          aria-label="Reason for referral"
           placeholder="Reason for referral"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -135,6 +137,7 @@ function DiagnosticForm({ encounterId, facilityId }: { encounterId: string; faci
       <form onSubmit={onSubmit} className="space-y-2">
         <input
           required
+          aria-label="Test name"
           placeholder="Test name (e.g. Malaria RDT)"
           value={testName}
           onChange={(e) => setTestName(e.target.value)}
@@ -170,9 +173,22 @@ function FollowUpForm({ patientId, encounterId, facilityId }: Props) {
   return (
     <Card title="Schedule a follow-up">
       <form onSubmit={onSubmit} className="space-y-2">
-        <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+        {/* A follow-up is by definition in the future; without min= the picker
+            happily accepted 1900-01-01, which Core also stores (see the QA
+            report -- whether the API should reject a past date is a product
+            decision, so only the entry point is guarded here). */}
         <input
           required
+          type="date"
+          aria-label="Follow-up date"
+          min={new Date().toISOString().slice(0, 10)}
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+        />
+        <input
+          required
+          aria-label="Follow-up reason"
           placeholder="Reason"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -236,6 +252,7 @@ function TeleconsultForm({ patientId, encounterId, facilityId }: Props) {
       <form onSubmit={onSubmit} className="space-y-2">
         <input
           type="file"
+          aria-label="Recording to attach (audio or video)"
           accept="audio/*,video/*"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="block w-full text-sm"

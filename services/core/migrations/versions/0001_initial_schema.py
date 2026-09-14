@@ -13,13 +13,13 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-user_role = postgresql.ENUM("asha", "doctor", "admin", name="user_role")
-facility_level = postgresql.ENUM("sub_centre", "phc", "district_hospital", name="facility_level")
-severity_level = postgresql.ENUM("RED", "YELLOW", "GREEN", name="severity_level")
-triage_source = postgresql.ENUM("llm", "checklist", name="triage_source")
-token_status = postgresql.ENUM("waiting", "in_progress", "done", name="token_status")
-escalation_status = postgresql.ENUM("open", "acknowledged", "resolved", name="escalation_status")
-scheme_status_enum = postgresql.ENUM("PMJAY", "state", "none", name="scheme_status_enum")
+user_role = postgresql.ENUM("asha", "doctor", "admin", name="user_role", create_type=False)
+facility_level = postgresql.ENUM("sub_centre", "phc", "district_hospital", name="facility_level", create_type=False)
+severity_level = postgresql.ENUM("RED", "YELLOW", "GREEN", name="severity_level", create_type=False)
+triage_source = postgresql.ENUM("llm", "checklist", name="triage_source", create_type=False)
+token_status = postgresql.ENUM("waiting", "in_progress", "done", name="token_status", create_type=False)
+escalation_status = postgresql.ENUM("open", "acknowledged", "resolved", name="escalation_status", create_type=False)
+scheme_status_enum = postgresql.ENUM("PMJAY", "state", "none", name="scheme_status_enum", create_type=False)
 
 
 def upgrade() -> None:

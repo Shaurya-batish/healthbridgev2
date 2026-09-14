@@ -32,6 +32,7 @@ export function AdjustStockControl({ stockId }: { stockId: string }) {
     <div className="flex items-center gap-2">
       <input
         type="number"
+        aria-label="Quantity to dispense or restock"
         min={1}
         value={amount}
         onChange={(e) => setAmount(e.target.value)}

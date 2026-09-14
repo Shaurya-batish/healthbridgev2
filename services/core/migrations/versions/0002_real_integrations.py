@@ -18,13 +18,13 @@ branch_labels = None
 depends_on = None
 
 scheme_verification_status = postgresql.ENUM(
-    "unverified", "pending", "verified", "failed", name="scheme_verification_status"
+    "unverified", "pending", "verified", "failed", name="scheme_verification_status", create_type=False
 )
-referral_status = postgresql.ENUM("pending", "accepted", "completed", "cancelled", name="referral_status")
-diagnostic_status = postgresql.ENUM("ordered", "in_progress", "completed", "cancelled", name="diagnostic_status")
-stock_movement_reason = postgresql.ENUM("restock", "dispensed", "adjustment", name="stock_movement_reason")
-follow_up_status = postgresql.ENUM("scheduled", "completed", "missed", "cancelled", name="follow_up_status")
-teleconsult_status = postgresql.ENUM("pending", "recorded", "reviewed", name="teleconsult_status")
+referral_status = postgresql.ENUM("pending", "accepted", "completed", "cancelled", name="referral_status", create_type=False)
+diagnostic_status = postgresql.ENUM("ordered", "in_progress", "completed", "cancelled", name="diagnostic_status", create_type=False)
+stock_movement_reason = postgresql.ENUM("restock", "dispensed", "adjustment", name="stock_movement_reason", create_type=False)
+follow_up_status = postgresql.ENUM("scheduled", "completed", "missed", "cancelled", name="follow_up_status", create_type=False)
+teleconsult_status = postgresql.ENUM("pending", "recorded", "reviewed", name="teleconsult_status", create_type=False)
 
 
 def upgrade() -> None:

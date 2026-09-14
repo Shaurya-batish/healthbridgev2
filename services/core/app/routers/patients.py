@@ -16,7 +16,13 @@ from app.db import get_db
 from app.fhir import build_patient_resource
 from app.idempotency import check_idempotency, record_idempotency
 from app.models import Encounter, Patient
-from app.schemas import PatientCreateRequest, PatientDetailResponse, PatientResponse, SchemeVerificationResponse
+from app.schemas import (
+    EncounterResponse,
+    PatientCreateRequest,
+    PatientDetailResponse,
+    PatientResponse,
+    SchemeVerificationResponse,
+)
 from app.security import CurrentUser
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -90,7 +96,13 @@ def get_patient(abha_number: str, current_user: CurrentUser, db: Session = Depen
 
     return PatientDetailResponse(
         patient=PatientResponse.model_validate(patient, from_attributes=True),
-        encounters=[e for e in encounters],
+        # Each Encounter must be validated out of the ORM object explicitly.
+        # PatientDetailResponse is constructed in Python (not handed to
+        # FastAPI's response_model serializer as raw rows), so Pydantic v2
+        # applies strict model validation to this list and rejects ORM
+        # instances -- which made GET /patients/{abha} a hard 500 for every
+        # patient that had at least one encounter.
+        encounters=[EncounterResponse.model_validate(e, from_attributes=True) for e in encounters],
     )
 
 
