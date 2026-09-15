@@ -1,0 +1,18 @@
+id,name,price(₹),Is_discontinued,manufacturer_name,type,pack_size_label,short_composition1,short_composition2
+1,SYNTHETIC Parabrand 650 Tablet,30.00,FALSE,Synthetic Test Pharma A,allopathy,strip of 15 tablets,Paracetamol (650mg),
+2,SYNTHETIC Cheapara 650 Tablet,3.30,FALSE,Synthetic Test Pharma B,allopathy,strip of 10 tablets,Paracetamol (650mg),
+3,SYNTHETIC Midpara 650 Tablet,15.00,FALSE,Synthetic Test Pharma C,allopathy,strip of 10 tablets,Paracetamol (0.65gm),
+4,SYNTHETIC Dearpara 650 Tablet,90.00,FALSE,Synthetic Test Pharma D,allopathy,strip of 10 tablets,Paracetamol (650mg),
+5,SYNTHETIC Para 500 Tablet,10.00,FALSE,Synthetic Test Pharma E,allopathy,strip of 10 tablets,Paracetamol (500mg),
+6,SYNTHETIC Para 650 SR Tablet,20.00,FALSE,Synthetic Test Pharma F,allopathy,strip of 10 tablet sr,Paracetamol (650mg),
+7,SYNTHETIC Para Suspension,40.00,FALSE,Synthetic Test Pharma G,allopathy,bottle of 60 ml Oral Suspension,Paracetamol (250mg/5ml),
+8,SYNTHETIC Old Para 650 Tablet,1.00,TRUE,Synthetic Test Pharma H,allopathy,strip of 10 tablets,Paracetamol (650mg),
+9,SYNTHETIC Coamox Tablet,200.00,FALSE,Synthetic Test Pharma A,allopathy,strip of 10 tablets,Amoxycillin  (500mg) ,  Clavulanic Acid (125mg)
+10,SYNTHETIC Coamox Rev Tablet,120.00,FALSE,Synthetic Test Pharma B,allopathy,strip of 6 tablets,Clavulanic Acid (125mg),Amoxycillin (0.5gm)
+11,SYNTHETIC Ceftri Injection,50.00,FALSE,Synthetic Test Pharma C,allopathy,vial of 1 injection,Ceftriaxone (1gm),
+12,SYNTHETIC Syrup NA,50.00,FALSE,Synthetic Test Pharma D,allopathy,bottle of 100 ml Syrup,Guaifenesin (NA),
+13,,5.00,FALSE,Synthetic Test Pharma X,allopathy,strip of 10 tablets,Paracetamol (650mg),
+14,SYNTHETIC Badprice Tablet,abc,FALSE,Synthetic Test Pharma X,allopathy,strip of 10 tablets,Paracetamol (650mg),
+2,SYNTHETIC Duplicate Id Tablet,1.00,FALSE,Synthetic Test Pharma X,allopathy,strip of 10 tablets,Paracetamol (650mg),
+15,SYNTHETIC Zeropack 650 Tablet,5.00,FALSE,Synthetic Test Pharma X,allopathy,strip of 0 tablets,Paracetamol (650mg),
+16,SYNTHETIC Badflag Tablet,5.00,MAYBE,Synthetic Test Pharma X,allopathy,strip of 10 tablets,Paracetamol (650mg),

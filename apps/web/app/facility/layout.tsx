@@ -13,6 +13,8 @@ export default function FacilityLayout({ children }: { children: React.ReactNode
           { href: "/facility/referrals", label: "Referrals" },
           { href: "/facility/diagnostics", label: "Diagnostics" },
           { href: "/facility/medicine-stock", label: "Medicine stock" },
+          { href: "/facility/medicines", label: "Medicines" },
+          { href: "/facility/substitutions", label: "Substitutions" },
           { href: "/facility/follow-ups", label: "Follow-ups" },
           { href: "/facility/teleconsults", label: "Teleconsults" },
         ]}

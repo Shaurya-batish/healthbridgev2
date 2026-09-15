@@ -4,4 +4,9 @@ pydantic>=2.7,<3.0
 httpx>=0.27,<1.0
 langgraph>=0.2,<1.0
 faster-whisper>=1.0,<2.0
+# Offline typed-complaint translation (app/translate.py). Heavy (pulls torch,
+# stanza, spacy); imported lazily, so the service still runs without it and
+# /translate honestly reports translation_unavailable. After installing, run
+# scripts/install_translation_packages.py once to fetch the hi/bn -> en models.
+argostranslate>=1.11,<2.0
 pytest>=8.0,<9.0

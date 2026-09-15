@@ -1,6 +1,10 @@
 import os
 
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+# 127.0.0.1, not "localhost": on Windows a refused connection costs ~2 s per
+# resolved address, and localhost resolves to ::1 then 127.0.0.1 -- a health
+# probe with Ollama absent took 4.25 s (measured 2026-09-15), longer than the
+# gateway's 3 s health timeout. Ollama listens on IPv4 loopback by default.
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "phi4-mini")
 PORT = int(os.environ.get("PORT", "8100"))
 RULES_PATH = os.environ.get("RULES_PATH")

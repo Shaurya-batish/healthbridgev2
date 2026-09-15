@@ -106,7 +106,10 @@ number**.
 **Relational tables:** `users`, `facilities`, `queue_tokens`,
 `triage_records`, `escalation_events`, `audit_log`, `referrals`,
 `diagnostic_orders`, `medicine_stock` (+ `medicine_stock_movements`
-ledger), `follow_ups`, `teleconsults` — plus on Patient: a `scheme_status`
+ledger), `follow_ups`, `teleconsults`, `complaint_captures` (multilingual
+complaint provenance), `medicine_sources` / `medicines` /
+`medicine_ingredients` (imported reference data), `medication_orders`,
+`substitution_requests` (see `docs/MULTILINGUAL-VOICE-MEDICINES.md`) — plus on Patient: a `scheme_status`
 enum (`PMJAY` / `state` / `none`, the ASHA's self-reported claim) and a
 separate `scheme_verification_status` enum (`unverified` / `pending` /
 `verified` / `failed`, only ever moved off `unverified` by a real NHA BIS

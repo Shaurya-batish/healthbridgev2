@@ -39,7 +39,11 @@ docker-volumes/
 
 # --- Real patient-uploaded media (teleconsult store-and-forward) ---
 # Never committed: this is real patient audio/video, not test fixtures.
+# Also holds downloaded medicine datasets (scripts/import_medicines.py --download).
 services/core/data/
+
+# --- Browser end-to-end run artifacts (screenshots, uploaded audio, evidence) ---
+apps/web/e2e-output/
 
 # --- Local models / caches (Whisper, Ollama, HF) ---
 .ollama/

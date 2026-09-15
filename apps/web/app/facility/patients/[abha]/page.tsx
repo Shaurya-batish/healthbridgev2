@@ -4,9 +4,11 @@ import { requireFacilitySession } from "@/lib/server-session";
 import { safeCoreRequest } from "@/lib/facility-data";
 import { FacilityUnavailable } from "@/components/FacilityUnavailable";
 import { SchemeBadge } from "@/components/SchemeBadge";
-import type { PatientDetail } from "@/lib/types";
+import type { MedicationOrder, PatientDetail } from "@/lib/types";
+import { strengthLabel } from "@/lib/medicine-format";
 import { VerifySchemeButton } from "./VerifySchemeButton";
 import { PatientActionForms } from "./PatientActionForms";
+import { PrescribeForm } from "./PrescribeForm";
 
 // ABDM's real, spec-accurate adapter is not yet connected to the live
 // gateway -- see docs/REAL-INTEGRATION-AUDIT.md. This distinguishes "we
@@ -109,12 +111,52 @@ export default async function FacilityPatientPage({ params }: { params: { abha: 
         />
       )}
 
+      <MedicationOrdersPanel patientId={patient.id} facilityId={session.facility_id} />
+      {encounters.length > 0 && session.role === "doctor" && <PrescribeForm encounterId={encounters[0].id} />}
+
       <details className="rounded-lg border border-slate-200 bg-white p-5">
         <summary className="cursor-pointer text-sm font-semibold text-slate-700">Raw FHIR Patient resource</summary>
         <pre className="mt-2 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
           {JSON.stringify(patient.fhir, null, 2)}
         </pre>
       </details>
+    </div>
+  );
+}
+
+async function MedicationOrdersPanel({ patientId, facilityId }: { patientId: string; facilityId: string }) {
+  const result = await safeCoreRequest<MedicationOrder[]>(
+    `/medication-orders/patient/${encodeURIComponent(patientId)}?facility_id=${encodeURIComponent(facilityId)}`,
+  );
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-slate-700">Prescriptions</h2>
+      {!result.ok && (
+        <div className="mt-2">
+          <FacilityUnavailable reason={result.reason} />
+        </div>
+      )}
+      {result.ok && result.data.length === 0 && <p className="mt-2 text-sm text-slate-400">No prescriptions at this facility.</p>}
+      {result.ok && result.data.length > 0 && (
+        <ul className="mt-2 divide-y divide-slate-100">
+          {result.data.map((order) => (
+            <li key={order.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
+              <div>
+                <p className={`font-semibold ${order.status === "active" ? "text-slate-800" : "text-slate-400 line-through"}`}>{order.medicine.brand_name}</p>
+                <p className="text-xs text-slate-600">{order.medicine.ingredients.map(strengthLabel).join(" + ")}</p>
+                <p className="text-xs text-slate-500">
+                  {order.instructions} · v{order.version} · {order.status}
+                </p>
+              </div>
+              {order.status === "active" && (
+                <a href={`/facility/medicines?order=${encodeURIComponent(order.id)}`} className="text-xs font-semibold text-teal-800 hover:underline">
+                  Compare same-composition options
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

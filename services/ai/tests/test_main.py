@@ -1,9 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main, ollama_client, transcribe
+from app import config, main, ollama_client, transcribe, translate
 
 client = TestClient(main.app)
+
+
+def _result(transcript: str, english: str) -> transcribe.TranscriptionResult:
+    return transcribe.TranscriptionResult(transcript, english, 2.0, "small")
 
 
 @pytest.fixture(autouse=True)
@@ -15,9 +19,11 @@ def _local_mode(monkeypatch):
 def test_health_endpoint_shape(monkeypatch):
     monkeypatch.setattr(ollama_client, "is_reachable", lambda *a, **k: False)
     monkeypatch.setattr(transcribe, "is_available", lambda: False)
+    monkeypatch.setattr(translate, "engine_loaded", lambda: True)
+    monkeypatch.setattr(translate, "_installed_pairs", lambda: {})
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"ai_mode": "local", "ollama_reachable": False, "whisper_available": False}
+    assert resp.json() == {"ai_mode": "local", "ollama_reachable": False, "whisper_available": False, "translation_languages": []}
 
 
 def test_extract_requires_input():
@@ -78,7 +84,7 @@ def test_extract_with_audio_sends_only_the_english_translation_to_the_llm(monkey
     monkeypatch.setattr(
         transcribe,
         "transcribe_and_translate",
-        lambda b64, language: ("बच्चे के मल में खून है", "the child has blood in the stool"),
+        lambda b64, language, mime_type=None: _result("बच्चे के मल में खून है", "the child has blood in the stool"),
     )
     seen = {}
 
@@ -98,7 +104,7 @@ def test_extract_with_audio_sends_only_the_english_translation_to_the_llm(monkey
 
 
 def test_extract_with_audio_returns_503_when_transcription_unavailable(monkeypatch):
-    def raise_unavailable(b64, language):
+    def raise_unavailable(b64, language, mime_type=None):
         raise transcribe.TranscriptionUnavailable("faster-whisper not installed")
 
     monkeypatch.setattr(transcribe, "transcribe_and_translate", raise_unavailable)
@@ -132,9 +138,9 @@ def test_extract_accepts_complaint_text_at_the_limit(monkeypatch):
 def test_transcribe_returns_original_and_english_and_no_decision(monkeypatch):
     seen = {}
 
-    def fake(b64, language):
+    def fake(b64, language, mime_type=None):
         seen["language"] = language
-        return "बच्चे को तेज़ बुखार है", "the child has a high fever"
+        return _result("बच्चे को तेज़ बुखार है", "the child has a high fever")
 
     monkeypatch.setattr(transcribe, "transcribe_and_translate", fake)
     resp = client.post("/transcribe", json={"audio_base64": "ZmFrZQ==", "language": "hi"})
@@ -144,6 +150,11 @@ def test_transcribe_returns_original_and_english_and_no_decision(monkeypatch):
         "transcript": "बच्चे को तेज़ बुखार है",
         "translation_en": "the child has a high fever",
         "language": "hi",
+        "engine": "faster-whisper",
+        "model": "small",
+        "duration_seconds": 2.0,
+        "transcript_warnings": [],
+        "translation_warnings": [],
     }
     assert seen["language"] == "hi"
     assert "severity" not in body and "rule_id" not in body
@@ -160,7 +171,7 @@ def test_transcribe_rejects_blank_audio():
 
 
 def test_transcribe_returns_503_when_whisper_unavailable(monkeypatch):
-    def raise_unavailable(b64, language):
+    def raise_unavailable(b64, language, mime_type=None):
         raise transcribe.TranscriptionUnavailable("faster-whisper not installed")
 
     monkeypatch.setattr(transcribe, "transcribe_and_translate", raise_unavailable)
@@ -170,7 +181,7 @@ def test_transcribe_returns_503_when_whisper_unavailable(monkeypatch):
 
 
 def test_transcribe_rejects_empty_transcript(monkeypatch):
-    monkeypatch.setattr(transcribe, "transcribe_and_translate", lambda b64, language: ("", ""))
+    monkeypatch.setattr(transcribe, "transcribe_and_translate", lambda b64, language, mime_type=None: _result("", ""))
     resp = client.post("/transcribe", json={"audio_base64": "ZmFrZQ==", "language": "en"})
     assert resp.status_code == 422
     assert resp.json()["detail"] == "empty_transcript"
@@ -191,7 +202,7 @@ def test_degraded_health_reports_false_without_probing(monkeypatch):
     monkeypatch.setattr(ollama_client, "is_reachable", lambda *a, **k: pytest.fail("must not probe Ollama"))
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"ai_mode": "degraded", "ollama_reachable": False, "whisper_available": False}
+    assert resp.json() == {"ai_mode": "degraded", "ollama_reachable": False, "whisper_available": False, "translation_languages": []}
 
 
 def test_degraded_transcription_is_really_disabled(monkeypatch):

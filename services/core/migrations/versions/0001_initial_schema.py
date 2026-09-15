@@ -23,7 +23,22 @@ scheme_status_enum = postgresql.ENUM("PMJAY", "state", "none", name="scheme_stat
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    # gen_random_uuid() is built into PostgreSQL 13+ core (the compose image is
+    # 16), so pgcrypto is only needed on older servers. Creating it
+    # unconditionally failed on PostgreSQL builds that don't ship contrib
+    # extensions (e.g. the pgserver wheel used by the test suite).
+    op.execute(
+        """
+        DO $$
+        BEGIN
+          IF current_setting('server_version_num')::int < 130000
+             OR EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pgcrypto') THEN
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+          END IF;
+        END
+        $$;
+        """
+    )
 
     bind = op.get_bind()
     for enum in (user_role, facility_level, severity_level, triage_source, token_status, escalation_status, scheme_status_enum):

@@ -91,15 +91,37 @@ class ExtractRequest(BaseModel):
 class TranscribeRequest(BaseModel):
     audio_base64: str = Field(min_length=1, max_length=_MAX_AUDIO_BASE64_CHARS)
     language: CaptureLanguage
+    # The recorder's MIME type (e.g. "audio/webm;codecs=opus"). Optional for
+    # backward compatibility; when present it must be an allowed audio format.
+    mime_type: Optional[str] = Field(default=None, max_length=100)
 
 
 class TranscribeResponse(BaseModel):
-    # Original-language text: what the ASHA confirms, stored verbatim in the audit log.
+    # Original-language text: what the ASHA reviews, corrects and confirms.
     transcript: str
-    # Whisper's own English translation of the same audio: the only text
-    # that is ever sent to Phi-4-mini.
+    # Whisper's own English translation of the same audio. After the ASHA
+    # confirms (or corrects) it, it is the only text sent to Phi-4-mini.
     translation_en: str
     language: CaptureLanguage
+    engine: str
+    model: str
+    duration_seconds: float
+    # e.g. "repetitive_output", "low_confidence", "mostly_non_letters" --
+    # shown to the ASHA as a reason to check the text; never auto-corrected.
+    transcript_warnings: list[str] = Field(default_factory=list)
+    translation_warnings: list[str] = Field(default_factory=list)
+
+
+class TranslateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=_MAX_COMPLAINT_CHARS)
+    source_language: CaptureLanguage
+
+
+class TranslateResponse(BaseModel):
+    translation_en: str
+    source_language: CaptureLanguage
+    engine: str
+    engine_version: Optional[str] = None
 
 
 class ExtractResponse(BaseModel):
@@ -115,3 +137,6 @@ class HealthResponse(BaseModel):
     ai_mode: Literal["local", "degraded"]
     ollama_reachable: bool
     whisper_available: bool
+    # Source languages with a real, installed <lang>->en typed-text
+    # translation package on this host. Empty when none are installed.
+    translation_languages: list[str] = Field(default_factory=list)

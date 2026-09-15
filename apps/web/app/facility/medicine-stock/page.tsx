@@ -2,15 +2,26 @@ import { requireFacilitySession } from "@/lib/server-session";
 import { safeCoreRequest } from "@/lib/facility-data";
 import { FacilityUnavailable } from "@/components/FacilityUnavailable";
 import { RefreshButton } from "@/components/RefreshButton";
-import type { MedicineStock } from "@/lib/types";
+import type { MedicineStock, MedicineSummary } from "@/lib/types";
 import { AddMedicineForm } from "./AddMedicineForm";
 import { AdjustStockControl } from "./AdjustStockControl";
+import { LinkMedicineControl } from "./LinkMedicineControl";
 
 export const dynamic = "force-dynamic";
 
 export default async function MedicineStockPage() {
   const session = await requireFacilitySession();
   const result = await safeCoreRequest<MedicineStock[]>(`/medicine-stock/facility/${session.facility_id}`);
+
+  // Resolve the names of linked reference medicines (one lookup per linked id).
+  const linkedIds = result.ok ? Array.from(new Set(result.data.map((i) => i.medicine_id).filter((id): id is string => !!id))) : [];
+  const linked = new Map<string, string>();
+  await Promise.all(
+    linkedIds.map(async (id) => {
+      const med = await safeCoreRequest<MedicineSummary>(`/medicines/${encodeURIComponent(id)}`);
+      linked.set(id, med.ok ? med.data.brand_name : "a reference medicine");
+    }),
+  );
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-5">
@@ -34,6 +45,7 @@ export default async function MedicineStockPage() {
                     {item.quantity_on_hand} {item.unit} on hand
                     {low && " · below reorder threshold"}
                   </p>
+                  <LinkMedicineControl stockId={item.id} linkedLabel={item.medicine_id ? (linked.get(item.medicine_id) ?? null) : null} />
                 </div>
                 <AdjustStockControl stockId={item.id} />
               </li>

@@ -167,13 +167,15 @@ export async function submitEncounterAndTriage(
   encounterPayload: Record<string, unknown>,
   triageEndpoint: string,
   triagePayload: Record<string, unknown>,
-): Promise<SubmitOutcome> {
   // Generated once, up front, and reused for BOTH the encounter and
   // triage calls, on every attempt (the initial direct try below and any
   // queued retry that follows) -- Core's idempotency cache is keyed by
   // (key, endpoint) together, so one shared id never collides between the
-  // two endpoints (see services/core/app/idempotency.py).
-  const opId = newId();
+  // two endpoints (see services/core/app/idempotency.py). A caller with its
+  // own stable visit id (a delayed voice capture, see voice-queue.ts) passes
+  // it so a repeated confirmation can never create a second encounter.
+  opId: string = newId(),
+): Promise<SubmitOutcome> {
 
   if (!navigator.onLine) {
     await put({
@@ -256,7 +258,7 @@ async function _flushQueue(): Promise<FlushResult> {
 
   for (const op of pending) {
     if (op.type === "create_patient") {
-      const result = await postJson(op.endpoint, op.payload);
+      const result = await postJson(op.endpoint, op.payload, op.id);
       if (result.ok) {
         await removeOperation(op.id);
         flushed += 1;
@@ -268,7 +270,7 @@ async function _flushQueue(): Promise<FlushResult> {
     }
 
     if (op.type === "triage_only") {
-      const result = await postJson(op.endpoint, op.payload);
+      const result = await postJson(op.endpoint, op.payload, op.id);
       if (result.ok) {
         await removeOperation(op.id);
         flushed += 1;
@@ -279,8 +281,11 @@ async function _flushQueue(): Promise<FlushResult> {
       return { flushed, remaining: (await listPending()).length, failed: { detail: result.body } };
     }
 
-    // encounter_with_triage
-    const encounterResult = await postJson(op.encounterEndpoint, op.encounterPayload);
+    // encounter_with_triage. The queued op's own id is replayed as the
+    // Idempotency-Key, exactly as the direct attempt used it -- the flush
+    // previously sent no key, so a flush that retried after a lost response
+    // could still duplicate the encounter/triage.
+    const encounterResult = await postJson(op.encounterEndpoint, op.encounterPayload, op.id);
     if (!encounterResult.ok) {
       if (encounterResult.networkError) break;
       await removeOperation(op.id);
@@ -289,7 +294,7 @@ async function _flushQueue(): Promise<FlushResult> {
 
     const encounterId = encounterResult.body.id;
     const resolvedTriagePayload = { ...op.triagePayload, encounter_id: encounterId };
-    const triageResult = await postJson(op.triageEndpoint, resolvedTriagePayload);
+    const triageResult = await postJson(op.triageEndpoint, resolvedTriagePayload, op.id);
 
     if (triageResult.ok) {
       await removeOperation(op.id);

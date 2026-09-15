@@ -41,6 +41,17 @@ diagnostics, medicine stock (real movement ledger), follow-up, and
 teleconsultation (real self-hosted store-and-forward: real uploaded
 audio/video, real playback).
 
+**Multilingual complaint capture, voice complaints and same-composition
+medicine comparison** (added 2026-09-15): explicit language selection for
+English/Hindi/Punjabi/Bengali/Marathi/Tamil, real local Whisper voice
+transcription with ASHA review/correction and offline recording queue, local
+Argos typed-text translation (Hindi and Bengali only), full provenance in
+Postgres, a checksum-verified import of a real licensed medicine dataset,
+fail-closed same-composition matching with real facility stock, and
+doctor-enforced substitution review. Languages, quality limits and what was
+verified for real are in
+[`docs/MULTILINGUAL-VOICE-MEDICINES.md`](./docs/MULTILINGUAL-VOICE-MEDICINES.md).
+
 **Real adapter, externally blocked:** ABDM gateway integration and PM-JAY
 scheme verification — both require formal NHA registration (HIP
 certification / hospital empanelment) that cannot be completed inside a
@@ -139,6 +150,11 @@ npm run dev   # http://localhost:3000
 Demo logins (after running `scripts/seed_facilities_and_users.sql`):
 `asha1` / `asha-demo-pass`, `doctor1` / `doctor-demo-pass`, `admin1` /
 `admin-demo-pass`.
+
+After migrations, import the medicine reference data (checksum-verified,
+never committed) with `python services/core/scripts/import_medicines.py
+--download`; see `docs/MULTILINGUAL-VOICE-MEDICINES.md` for AI model and
+translation-package setup.
 
 ## Owner
 

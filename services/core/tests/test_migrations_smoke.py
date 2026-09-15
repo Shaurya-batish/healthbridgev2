@@ -1,7 +1,7 @@
-"""Runs the real Alembic migrations against a real Postgres, then rolls them
-back.
+"""Runs the real Alembic migrations against a real Postgres, then rolls the
+newest ones back and forward again.
 
-Why this exists: the rest of the suite builds its tables with
+Why this exists: the rest of the suite builds most tables with
 `model.__table__.create(engine)` against in-memory SQLite, so until
 2026-09-13 nothing had ever executed `migrations/`. `alembic upgrade head`
 failed on any clean database -- every postgresql.ENUM was pre-created with
@@ -10,89 +10,51 @@ CREATE TYPE a second time:
 
     psycopg2.errors.DuplicateObject: type "facility_level" already exists
 
-The schema could not be created at all, and no test could see it.
-
-The test is skipped when no Postgres is reachable, so it stays harmless in a
-SQLite-only environment. It never touches the application database: it
-creates its own throwaway database and drops it again.
+The Postgres comes from DATABASE_URL when reachable, otherwise from a
+throwaway `pgserver` instance (see conftest.pg_admin_url). It never touches
+the application database.
 """
-import os
-import subprocess
-import sys
-import uuid
-from pathlib import Path
-
-import pytest
 import sqlalchemy as sa
-from sqlalchemy.engine import make_url
 
-CORE_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_URL = "postgresql://healthbridge:healthbridge@localhost:5432/healthbridge"
+from tests.conftest import pg_url_string, run_alembic
 
 EXPECTED_TABLES = {
-    "alembic_version", "audit_log", "diagnostic_orders", "encounters",
+    "alembic_version", "audit_log", "complaint_captures", "diagnostic_orders", "encounters",
     "escalation_events", "facilities", "follow_ups", "idempotency_keys",
+    "medication_orders", "medicine_ingredients", "medicine_sources", "medicines",
     "medicine_stock", "medicine_stock_movements", "observations", "patients",
-    "queue_tokens", "referrals", "teleconsults", "triage_records", "users",
+    "queue_tokens", "referrals", "substitution_requests", "teleconsults", "triage_records", "users",
 }
 
 
-def _admin_url():
-    url = make_url(os.environ.get("DATABASE_URL", DEFAULT_URL))
-    return url.set(database="postgres")
-
-
-def _postgres_available(url) -> bool:
+def _tables(url) -> set[str]:
+    engine = sa.create_engine(url)
     try:
-        engine = sa.create_engine(url, connect_args={"connect_timeout": 2})
-        with engine.connect():
-            return True
-    except Exception:
-        return False
+        return set(sa.inspect(engine).get_table_names())
     finally:
-        try:
-            engine.dispose()
-        except Exception:
-            pass
+        engine.dispose()
 
 
-@pytest.mark.skipif(
-    not _postgres_available(_admin_url()),
-    reason="no reachable Postgres; migrations can only be smoke-tested against the real engine",
-)
-def test_alembic_upgrade_head_on_a_clean_database():
-    admin = sa.create_engine(_admin_url(), isolation_level="AUTOCOMMIT")
-    scratch = f"hb_migration_smoke_{uuid.uuid4().hex[:8]}"
-    with admin.connect() as conn:
-        conn.execute(sa.text(f'CREATE DATABASE "{scratch}"'))
+def test_alembic_upgrade_head_on_a_clean_database(pg_migrated_url):
+    target = pg_url_string(pg_migrated_url)
+    missing = EXPECTED_TABLES - _tables(pg_migrated_url)
+    assert not missing, f"migrations ran but these tables are missing: {sorted(missing)}"
+
+    # Re-running must be a no-op, not a DuplicateObject.
+    again = run_alembic(target, "upgrade", "head")
+    assert again.returncode == 0, f"second upgrade head failed:\n{again.stdout}\n{again.stderr}"
+
+    # The new migrations must be reversible and re-appliable.
+    down = run_alembic(target, "downgrade", "0004")
+    assert down.returncode == 0, f"downgrade to 0004 failed:\n{down.stdout}\n{down.stderr}"
+    after_down = _tables(pg_migrated_url)
+    assert not {"complaint_captures", "medicines", "substitution_requests"} & after_down
+    engine = sa.create_engine(pg_migrated_url)
     try:
-        target = str(_admin_url().set(database=scratch))
-        env = {**os.environ, "DATABASE_URL": target}
-        up = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], cwd=CORE_DIR, env=env, capture_output=True, text=True
-        )
-        assert up.returncode == 0, f"alembic upgrade head failed:\n{up.stdout}\n{up.stderr}"
-
-        engine = sa.create_engine(target)
-        try:
-            found = set(sa.inspect(engine).get_table_names())
-        finally:
-            engine.dispose()
-        missing = EXPECTED_TABLES - found
-        assert not missing, f"migrations ran but these tables are missing: {sorted(missing)}"
-
-        # Re-running must be a no-op, not a DuplicateObject.
-        again = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], cwd=CORE_DIR, env=env, capture_output=True, text=True
-        )
-        assert again.returncode == 0, f"second upgrade head failed:\n{again.stdout}\n{again.stderr}"
+        assert "medicine_id" not in {c["name"] for c in sa.inspect(engine).get_columns("medicine_stock")}
     finally:
-        with admin.connect() as conn:
-            conn.execute(
-                sa.text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :d"
-                ),
-                {"d": scratch},
-            )
-            conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{scratch}"'))
-        admin.dispose()
+        engine.dispose()
+
+    up = run_alembic(target, "upgrade", "head")
+    assert up.returncode == 0, f"re-upgrade failed:\n{up.stdout}\n{up.stderr}"
+    assert EXPECTED_TABLES <= _tables(pg_migrated_url)
