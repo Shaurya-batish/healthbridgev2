@@ -72,6 +72,13 @@ services:
       dockerfile: services/ai/Dockerfile
     restart: unless-stopped
     environment:
+      # local = Whisper + Ollama on this machine; degraded = hosted build with
+      # no model runtime (see docs/DEPLOYMENT.md).
+      AI_MODE: ${AI_MODE:-local}
+      # Required before exposing this service through scripts/start-ai-tunnel.*;
+      # must equal the gateway's AI_SHARED_SECRET.
+      AI_SHARED_SECRET: ${AI_SHARED_SECRET:-}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-phi4-mini}
       PORT: 8100
@@ -100,7 +107,9 @@ services:
     restart: unless-stopped
     environment:
       CORE_SERVICE_URL: http://core:8000
+      # Fallback only -- an admin-set override in Redis wins (docs/DEPLOYMENT.md).
       AI_SERVICE_URL: http://ai:8100
+      AI_SHARED_SECRET: ${AI_SHARED_SECRET:-}
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       PORT: 3000
     ports:

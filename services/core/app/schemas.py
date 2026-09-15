@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -321,6 +322,32 @@ class TeleconsultResponse(BaseModel):
     doctor_response_text: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AiServiceUrlUpdateRequest(BaseModel):
+    # Required but nullable: an explicit null clears the override and the
+    # gateway falls back to its AI_SERVICE_URL env var.
+    url: str | None = Field(max_length=500)
+
+    @field_validator("url")
+    @classmethod
+    def _absolute_http_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("must be an absolute http(s) URL")
+        if parts.username or parts.password or parts.query or parts.fragment:
+            raise ValueError("must not contain credentials, a query string or a fragment")
+        return value.rstrip("/")
+
+
+class AiServiceUrlResponse(BaseModel):
+    url: str | None
+    redis_reachable: bool
 
 
 class SchemeVerificationResponse(BaseModel):

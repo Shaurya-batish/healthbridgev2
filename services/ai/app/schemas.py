@@ -76,14 +76,35 @@ def coerce_to_fact_schema(raw: dict[str, Any]) -> dict[str, Any]:
     return ExtractedFacts(**accepted).model_dump()
 
 
+CaptureLanguage = Literal["en", "hi", "pa", "bn", "mr", "ta"]
+
+
 class ExtractRequest(BaseModel):
     complaint_text: Optional[str] = Field(default=None, max_length=_MAX_COMPLAINT_CHARS)
     audio_base64: Optional[str] = Field(default=None, max_length=_MAX_AUDIO_BASE64_CHARS)
-    age_months: Optional[float] = None
+    age_months: Optional[float] = Field(default=None, ge=0, le=1200)
+    # Spoken language of audio_base64. Whisper translates the audio to
+    # English before extraction; ignored for complaint_text.
+    language: CaptureLanguage = "en"
+
+
+class TranscribeRequest(BaseModel):
+    audio_base64: str = Field(min_length=1, max_length=_MAX_AUDIO_BASE64_CHARS)
+    language: CaptureLanguage
+
+
+class TranscribeResponse(BaseModel):
+    # Original-language text: what the ASHA confirms, stored verbatim in the audit log.
+    transcript: str
+    # Whisper's own English translation of the same audio: the only text
+    # that is ever sent to Phi-4-mini.
+    translation_en: str
+    language: CaptureLanguage
 
 
 class ExtractResponse(BaseModel):
     transcript: Optional[str] = None
+    translation_en: Optional[str] = None
     extracted_facts: dict[str, Any]
     severity: Literal["RED", "YELLOW", "GREEN"]
     rule_id: str
@@ -91,5 +112,6 @@ class ExtractResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    ai_mode: Literal["local", "degraded"]
     ollama_reachable: bool
     whisper_available: bool

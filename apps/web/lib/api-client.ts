@@ -2,10 +2,10 @@
 // to the Core and AI services. Route handlers are the ONLY place these are
 // used — client components never import this file, they call /api/** on
 // this same Next.js app, per the architecture ("both clients talk only to
-// the gateway").
+// the gateway"). The AI transport lives in ai-service.ts, because its base
+// URL is resolved per request rather than read once from the environment.
 
 export const CORE_SERVICE_URL = process.env.CORE_SERVICE_URL ?? "http://localhost:8000";
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://localhost:8100";
 
 export class UpstreamError extends Error {
   constructor(
@@ -16,7 +16,7 @@ export class UpstreamError extends Error {
   }
 }
 
-async function request(baseUrl: string, path: string, init?: RequestInit): Promise<unknown> {
+export async function requestJson(baseUrl: string, path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
@@ -27,7 +27,14 @@ async function request(baseUrl: string, path: string, init?: RequestInit): Promi
   });
 
   const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    // A non-JSON body (an HTML error page from a proxy or a dead tunnel) is
+    // an upstream failure, not a gateway crash.
+    throw new UpstreamError(res.ok ? 502 : res.status, { detail: "non_json_upstream_response" });
+  }
 
   if (!res.ok) {
     throw new UpstreamError(res.status, body);
@@ -37,11 +44,7 @@ async function request(baseUrl: string, path: string, init?: RequestInit): Promi
 }
 
 export function coreRequest(path: string, init?: RequestInit): Promise<unknown> {
-  return request(CORE_SERVICE_URL, path, init);
-}
-
-export function aiRequest(path: string, init?: RequestInit): Promise<unknown> {
-  return request(AI_SERVICE_URL, path, init);
+  return requestJson(CORE_SERVICE_URL, path, init);
 }
 
 export function authHeader(token: string | undefined): Record<string, string> {

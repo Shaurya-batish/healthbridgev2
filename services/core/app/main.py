@@ -15,6 +15,7 @@ from app.routers import (
     patients,
     queue,
     referrals,
+    runtime_config,
     teleconsults,
     triage,
 )
@@ -42,3 +43,4 @@ app.include_router(diagnostics.router)
 app.include_router(medicine_stock.router)
 app.include_router(follow_ups.router)
 app.include_router(teleconsults.router)
+app.include_router(runtime_config.router)
