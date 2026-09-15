@@ -6,6 +6,8 @@
     "sync-rules": "node ./scripts/sync-rules.mjs",
     "predev": "npm run sync-rules",
     "prebuild": "npm run sync-rules",
+    "pretest": "npm run sync-rules",
+    "pretypecheck": "npm run sync-rules",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

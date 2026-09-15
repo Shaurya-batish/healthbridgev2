@@ -41,6 +41,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       PORT: 8000
       CORE_ALLOWED_ORIGINS: ${CORE_ALLOWED_ORIGINS:-http://localhost:3000}
+      TELECONSULT_MEDIA_DIR: /data/teleconsult-media
+    volumes:
+      - teleconsultdata:/data/teleconsult-media
     ports:
       - "8000:8000"
     depends_on:
@@ -138,3 +141,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  teleconsultdata:
