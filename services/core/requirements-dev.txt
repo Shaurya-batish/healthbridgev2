@@ -1,0 +1,5 @@
+-r requirements.txt
+# Starts a throwaway local PostgreSQL for the real-Postgres tests
+# (tests/conftest.py::pg_admin_url) when no DATABASE_URL server is reachable,
+# so migrations, JSONB tables and row locks are tested without Docker.
+pgserver==0.1.4

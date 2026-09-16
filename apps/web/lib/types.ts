@@ -163,6 +163,108 @@ export interface MedicineStock {
   unit: string;
   quantity_on_hand: number;
   reorder_threshold: number;
+  medicine_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Same-composition comparison (Core /medicines, /medication-orders, /substitution-requests) ---
+// Prices and strengths are strings from Core (Decimals) -- never parsed to
+// floats for arithmetic in the browser.
+
+export interface MedicineIngredient {
+  name: string;
+  strength_value: string | null;
+  strength_unit: string | null;
+  raw_text: string;
+}
+
+export interface MedicineSummary {
+  id: string;
+  brand_name: string;
+  generic_name: string | null;
+  manufacturer: string | null;
+  dosage_form: string | null;
+  route: string | null;
+  release_type: string;
+  pack_label: string | null;
+  pack_quantity: string | null;
+  pack_unit: "unit" | "mL" | "g" | null;
+  price: string | null;
+  price_basis: string;
+  currency: string;
+  unit_price: string | null;
+  is_discontinued: boolean;
+  match_status: "matchable" | "insufficient_metadata";
+  insufficient_reasons: string[];
+  ingredients: MedicineIngredient[];
+  source: { name: string; license: string; source_url: string; source_version: string | null; source_updated_on: string | null; imported_at: string };
+}
+
+export interface MedicineList {
+  items: MedicineSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FacilityStockInfo {
+  status: "available" | "unavailable" | "stale" | "unknown";
+  stock_id: string | null;
+  quantity_on_hand: number | null;
+  last_counted_at: string | null;
+}
+
+export interface SubstituteCandidate {
+  medicine: MedicineSummary;
+  stock: FacilityStockInfo;
+  price_comparable: boolean;
+  saving_percent: number | null;
+}
+
+export interface SubstitutesResponse {
+  reference: MedicineSummary;
+  reference_stock: FacilityStockInfo;
+  facility_id: string;
+  comparable: boolean;
+  not_comparable_reasons: string[];
+  candidates: SubstituteCandidate[];
+  total_candidates: number;
+  notice: string;
+  generated_at: string;
+}
+
+export interface MedicationOrder {
+  id: string;
+  patient_id: string;
+  encounter_id: string;
+  facility_id: string;
+  medicine: MedicineSummary;
+  instructions: string;
+  status: "active" | "superseded" | "cancelled";
+  version: number;
+  supersedes_order_id: string | null;
+  prescribed_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubstitutionRequest {
+  id: string;
+  order_id: string;
+  patient_id: string;
+  encounter_id: string;
+  facility_id: string;
+  original_medicine: MedicineSummary;
+  proposed_medicine: MedicineSummary;
+  order_version: number;
+  status: "pending" | "approved" | "rejected" | "invalidated";
+  requested_by_user_id: string;
+  request_note: string | null;
+  reviewed_by_user_id: string | null;
+  reviewed_at: string | null;
+  decision_note: string | null;
+  resulting_order_id: string | null;
   created_at: string;
   updated_at: string;
 }

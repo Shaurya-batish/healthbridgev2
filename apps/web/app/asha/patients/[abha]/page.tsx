@@ -1,9 +1,10 @@
 import { authHeader, coreRequest, UpstreamError } from "@/lib/api-client";
-import { getSessionToken } from "@/lib/auth";
+import { getSessionToken, verifySession } from "@/lib/auth";
 import { SchemeBadge } from "@/components/SchemeBadge";
 import { AshaButton } from "@/components/asha/AshaButton";
 import { IconArrowRight, IconAlertTriangle } from "@/components/asha/icons";
-import type { PatientDetail } from "@/lib/types";
+import { strengthLabel } from "@/lib/medicine-format";
+import type { MedicationOrder, PatientDetail } from "@/lib/types";
 
 export default async function AshaPatientPage({ params }: { params: { abha: string } }) {
   let detail: PatientDetail | null = null;
@@ -77,6 +78,8 @@ export default async function AshaPatientPage({ params }: { params: { abha: stri
         Start Visit
       </AshaButton>
 
+      <PatientPrescriptions patientId={patient.id} />
+
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-base font-semibold text-slate-700">Past Visits</h2>
         {!encounters.length && <p className="mt-2 text-slate-500">No visits recorded yet.</p>}
@@ -88,6 +91,49 @@ export default async function AshaPatientPage({ params }: { params: { abha: stri
           ))}
         </ul>
       </div>
+    </div>
+  );
+}
+
+/** Active prescriptions at the ASHA's facility, each with an informational
+ * same-composition comparison and a doctor-review request -- never a change. */
+async function PatientPrescriptions({ patientId }: { patientId: string }) {
+  const token = getSessionToken();
+  const session = token ? await verifySession(token) : null;
+  if (!session?.facility_id) return null;
+
+  let orders: MedicationOrder[] | null = null;
+  try {
+    orders = (await coreRequest(
+      `/medication-orders/patient/${encodeURIComponent(patientId)}?facility_id=${encodeURIComponent(session.facility_id)}`,
+      { headers: authHeader(token) },
+    )) as MedicationOrder[];
+  } catch {
+    orders = null;
+  }
+
+  const active = orders?.filter((o) => o.status === "active") ?? [];
+  if (orders !== null && active.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="text-base font-semibold text-slate-700">Current prescriptions</h2>
+      {orders === null && <p className="mt-2 text-slate-500">Prescriptions couldn&apos;t be loaded right now.</p>}
+      <ul className="mt-2 space-y-3">
+        {active.map((order) => (
+          <li key={order.id} className="rounded-xl border border-slate-200 p-3">
+            <p className="font-semibold text-slate-800">{order.medicine.brand_name}</p>
+            <p className="text-sm text-slate-600">{order.medicine.ingredients.map(strengthLabel).join(" + ")}</p>
+            <p className="text-sm text-slate-500">{order.instructions}</p>
+            <a
+              href={`/asha/medicines?order=${encodeURIComponent(order.id)}`}
+              className="mt-2 flex min-h-[44px] items-center justify-center rounded-xl border-2 border-teal-700 px-3 text-base font-semibold text-teal-800"
+            >
+              Compare same-composition options
+            </a>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

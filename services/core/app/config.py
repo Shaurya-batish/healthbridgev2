@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # generous for a voice/video note recorded on a low-end phone.
     teleconsult_max_upload_bytes: int = 25 * 1024 * 1024
 
+    # --- Same-composition comparison ---
+    # A linked stock row whose last recorded count (latest ledger movement,
+    # or creation) is older than this is reported as "stale", not available.
+    stock_stale_after_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

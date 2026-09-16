@@ -16,7 +16,24 @@ logic" section; that separation is load-bearing and must not be collapsed.
   model output can't be parsed as JSON, or (for audio input) Whisper isn't
   available — callers must treat all of these as "skip the LLM, use the
   on-device checklist," not as a hard failure.
-- `GET /health` — `{ollama_reachable, whisper_available}`.
+- `POST /transcribe` — `{audio_base64, language, mime_type?}` →
+  `{transcript, translation_en, language, engine, model, duration_seconds}`.
+  Speech → original-language text (beam search, bounded temperature fallback)
+  plus Whisper's English translation (default decoding). Never a severity.
+  422 `invalid_audio`/`audio_too_short`/`audio_too_long`/`unsupported_audio_format`/
+  `empty_transcript`; 503 `transcription_unavailable`. Recordings 0.5–120 s.
+- `POST /translate` — `{text, source_language}` → `{translation_en, engine,
+  engine_version}` for TYPED complaints, via local Argos Translate. 503
+  `{code: translation_unavailable, reason}` when the language package isn't
+  installed (Punjabi, Marathi and Tamil have none), the engine isn't installed,
+  or `AI_MODE=degraded`.
+- `GET /health` — `{ai_mode, ollama_reachable, whisper_available,
+  translation_languages}`. Non-blocking: translation languages appear once the
+  Argos engine has finished loading in the background.
+
+The ASHA app never sends audio to `/triage/extract`: it calls `/transcribe`,
+the ASHA confirms or corrects the text, and only the confirmed English is sent
+for extraction.
 
 ## Local setup
 
@@ -57,6 +74,29 @@ WhisperModel("small", device="cpu", compute_type="int8")
 
 Until then, `audio_base64` requests return `503 ai_unavailable`; `complaint_text`
 requests are unaffected.
+
+(2026-09-15: the `small` model was downloaded and run for real on Hindi and
+Tamil speech; results and quality limits are in
+`docs/MULTILINGUAL-VOICE-MEDICINES.md`.)
+
+### Typed-text translation (Argos Translate, optional)
+
+```bash
+pip install argostranslate          # already in requirements.txt; pulls torch
+python scripts/install_translation_packages.py   # hi->en and bn->en; needs internet once
+# restart the service afterwards -- installed languages are read when the engine loads
+```
+
+`ARGOS_CHUNK_TYPE` defaults to `MINISBD` in `app/translate.py`: the published
+Bengali package's bundled Stanza splitter crashes under stanza 1.10. MiniSBD
+downloads a small sentence model on first use per language (Hindi: 178 KB);
+Bengali has none and falls back to Argos' English splitter.
+
+### Real-model checks (opt-in, not mocked)
+
+```bash
+HB_REAL_MODELS=1 HB_SPEECH_DIR=/path/to/fleurs/clips pytest tests/test_real_models.py -s
+```
 
 ## Tests
 

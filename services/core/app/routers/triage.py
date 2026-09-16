@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import case, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -10,6 +11,7 @@ from app.idempotency import check_idempotency, record_idempotency
 from app.models import (
     SEVERITY_RANK,
     AuditLog,
+    ComplaintCapture,
     Encounter,
     EscalationEvent,
     Observation,
@@ -17,7 +19,7 @@ from app.models import (
     TriageRecord,
 )
 from app.redis_client import publish_escalation
-from app.schemas import TriageRecordResponse, TriageRequest, TriageResponse
+from app.schemas import ComplaintCaptureResponse, TriageRecordResponse, TriageRequest, TriageResponse
 from app.security import CurrentUser, require_facility_access
 
 router = APIRouter(prefix="/triage", tags=["triage"])
@@ -90,6 +92,47 @@ def submit_triage(
     db.add(triage_record)
     db.flush()
 
+    capture_row: ComplaintCapture | None = None
+    if payload.complaint_capture is not None:
+        cap = payload.complaint_capture
+        if db.scalar(select(ComplaintCapture.id).where(ComplaintCapture.client_capture_id == cap.client_capture_id)):
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="complaint_capture_already_recorded")
+        english_status = "not_required" if cap.language == "en" else cap.translation_status
+        capture_row = ComplaintCapture(
+            triage_record_id=triage_record.id,
+            encounter_id=encounter.id,
+            captured_by_user_id=uuid.UUID(current_user.user_id),
+            client_capture_id=cap.client_capture_id,
+            input_source=cap.input_source,
+            language=cap.language,
+            original_text=cap.original_text,
+            initial_machine_translation_en=cap.initial_machine_translation_en,
+            initial_translation_engine=cap.initial_translation_engine,
+            machine_translation_en=cap.machine_translation_en,
+            translation_engine=cap.translation_engine,
+            translation_status=english_status,
+            confirmed_original_text=cap.confirmed_original_text,
+            confirmed_text_en=cap.confirmed_text_en,
+            # Derived server-side from the texts themselves, never trusted from the client.
+            original_edited=cap.confirmed_original_text.strip() != cap.original_text.strip(),
+            english_edited=cap.language != "en"
+            and (cap.machine_translation_en or "").strip() != cap.confirmed_text_en.strip(),
+            captured_at=cap.captured_at,
+            confirmed_at=cap.confirmed_at,
+            consent_confirmed_at=cap.consent_confirmed_at,
+            audio_sha256=cap.audio_sha256,
+            audio_duration_seconds=cap.audio_duration_seconds,
+            audio_mime_type=cap.audio_mime_type,
+        )
+        db.add(capture_row)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            # Concurrent replay of the same offline capture past the pre-check.
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="complaint_capture_already_recorded") from exc
+
     # Update (not replace) the encounter's queue token -- this is the "queue
     # reorder": GET /queue/{facility_id} sorts by severity at read time, so
     # changing this field is what moves the patient in the queue.
@@ -135,6 +178,31 @@ def submit_triage(
                 "severity": payload.severity,
                 "source": payload.source,
                 "escalation_created": escalation_created,
+                # Clinical provenance lives in the protected audit trail and
+                # complaint_captures only -- never in application logs.
+                "complaint_capture": (
+                    {
+                        "id": str(capture_row.id),
+                        "input_source": capture_row.input_source,
+                        "language": capture_row.language,
+                        "original_text": capture_row.original_text,
+                        "initial_machine_translation_en": capture_row.initial_machine_translation_en,
+                        "initial_translation_engine": capture_row.initial_translation_engine,
+                        "machine_translation_en": capture_row.machine_translation_en,
+                        "translation_engine": capture_row.translation_engine,
+                        "translation_status": capture_row.translation_status,
+                        "confirmed_original_text": capture_row.confirmed_original_text,
+                        "confirmed_text_en": capture_row.confirmed_text_en,
+                        "original_edited": capture_row.original_edited,
+                        "english_edited": capture_row.english_edited,
+                        "captured_at": capture_row.captured_at.isoformat(),
+                        "confirmed_at": capture_row.confirmed_at.isoformat(),
+                        "audio_sha256": capture_row.audio_sha256,
+                        "audio_duration_seconds": capture_row.audio_duration_seconds,
+                    }
+                    if capture_row is not None
+                    else None
+                ),
             },
         )
     )
@@ -145,8 +213,13 @@ def submit_triage(
 
     position = _queue_position(db, encounter.facility_id, queue_token)
 
+    record_response = TriageRecordResponse.model_validate(triage_record, from_attributes=True)
+    if capture_row is not None:
+        db.refresh(capture_row)
+        record_response.complaint_capture = ComplaintCaptureResponse.model_validate(capture_row, from_attributes=True)
+
     response = TriageResponse(
-        triage_record=TriageRecordResponse.model_validate(triage_record, from_attributes=True),
+        triage_record=record_response,
         queue_position=position,
         escalation_created=escalation_created,
     )

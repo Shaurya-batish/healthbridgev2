@@ -24,6 +24,7 @@ export interface OfflineSyncState {
     encounterPayload: Record<string, unknown>,
     triageEndpoint: string,
     triagePayload: Record<string, unknown>,
+    opId?: string,
   ) => Promise<SubmitOutcome>;
   syncNow: () => Promise<void>;
 }
@@ -87,8 +88,9 @@ export function useOfflineSync(): OfflineSyncState {
       encounterPayload: Record<string, unknown>,
       triageEndpoint: string,
       triagePayload: Record<string, unknown>,
+      opId?: string,
     ) => {
-      const result = await submitEncounterAndTriage(encounterEndpoint, encounterPayload, triageEndpoint, triagePayload);
+      const result = await submitEncounterAndTriage(encounterEndpoint, encounterPayload, triageEndpoint, triagePayload, opId);
       await refreshPendingCount();
       return result;
     },

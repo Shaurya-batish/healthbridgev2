@@ -11,11 +11,14 @@ from app.routers import (
     escalations,
     follow_ups,
     health,
+    medication_orders,
     medicine_stock,
+    medicines,
     patients,
     queue,
     referrals,
     runtime_config,
+    substitution_requests,
     teleconsults,
     triage,
 )
@@ -44,3 +47,6 @@ app.include_router(medicine_stock.router)
 app.include_router(follow_ups.router)
 app.include_router(teleconsults.router)
 app.include_router(runtime_config.router)
+app.include_router(medicines.router)
+app.include_router(medication_orders.router)
+app.include_router(substitution_requests.router)

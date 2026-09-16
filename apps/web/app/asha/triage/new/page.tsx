@@ -2,7 +2,7 @@ import { getSessionToken, verifySession } from "@/lib/auth";
 import { IconAlertTriangle } from "@/components/asha/icons";
 import { TriageCaptureForm } from "./TriageCaptureForm";
 
-export default async function NewTriagePage({ searchParams }: { searchParams: { abha?: string } }) {
+export default async function NewTriagePage({ searchParams }: { searchParams: { abha?: string; capture?: string } }) {
   const token = getSessionToken();
   const session = token ? await verifySession(token) : null;
   const abha = searchParams.abha ?? "";
@@ -16,5 +16,14 @@ export default async function NewTriagePage({ searchParams }: { searchParams: { 
     );
   }
 
-  return <TriageCaptureForm abhaNumber={abha} facilityId={session.facility_id} />;
+  return (
+    <TriageCaptureForm
+      // A different capture id must remount the form, never reuse another visit's state.
+      key={searchParams.capture ?? "new"}
+      abhaNumber={abha}
+      facilityId={session.facility_id}
+      userId={session.sub}
+      resumeCaptureId={searchParams.capture}
+    />
+  );
 }

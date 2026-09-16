@@ -7,7 +7,7 @@ WORKDIR /app
 
 FROM base AS deps
 COPY apps/web/package.json apps/web/package-lock.json* ./apps/web/
-RUN cd apps/web && npm install --no-audit --no-fund
+RUN cd apps/web && npm ci --no-audit --no-fund
 
 FROM base AS builder
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules

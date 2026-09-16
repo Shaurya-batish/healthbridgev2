@@ -5,7 +5,7 @@ import hmac
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from . import config, ollama_client, rules_engine, transcribe
+from . import config, ollama_client, rules_engine, transcribe, translate
 from .graph import run_extraction
 from .schemas import (
     ExtractRequest,
@@ -13,9 +13,11 @@ from .schemas import (
     HealthResponse,
     TranscribeRequest,
     TranscribeResponse,
+    TranslateRequest,
+    TranslateResponse,
 )
 
-app = FastAPI(title="HealthBridge AI service", version="0.1.0")
+app = FastAPI(title="HealthBridge AI service", version="0.2.0")
 
 
 @app.middleware("http")
@@ -36,28 +38,60 @@ def health() -> HealthResponse:
     # In degraded mode neither runtime exists on this host, so report false
     # without probing -- truthful, and no 2s Ollama timeout per health check.
     if config.is_degraded():
-        return HealthResponse(ai_mode="degraded", ollama_reachable=False, whisper_available=False)
+        return HealthResponse(ai_mode="degraded", ollama_reachable=False, whisper_available=False, translation_languages=[])
     return HealthResponse(
         ai_mode="local",
         ollama_reachable=ollama_client.is_reachable(),
         whisper_available=transcribe.is_available(),
+        translation_languages=translate.available_languages(),
     )
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 def transcribe_audio(req: TranscribeRequest) -> TranscribeResponse:
     """Speech -> text only, never a severity. The ASHA app shows `transcript`
-    (original language) as editable text, with `translation_en` beneath it;
-    nothing reaches /triage/extract until a human has confirmed it."""
+    (original language) and `translation_en` as editable text; nothing reaches
+    /triage/extract until a human has confirmed the English text."""
     try:
-        original, english = transcribe.transcribe_and_translate(req.audio_base64, language=req.language)
+        result = transcribe.transcribe_and_translate(req.audio_base64, language=req.language, mime_type=req.mime_type)
     except transcribe.InvalidAudio as exc:
-        raise HTTPException(status_code=422, detail="invalid_audio") from exc
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
     except transcribe.TranscriptionUnavailable as exc:
         raise HTTPException(status_code=503, detail="transcription_unavailable") from exc
-    if not original or not english:
+    if not result.transcript or not result.translation_en:
         raise HTTPException(status_code=422, detail="empty_transcript")
-    return TranscribeResponse(transcript=original, translation_en=english, language=req.language)
+    return TranscribeResponse(
+        transcript=result.transcript,
+        translation_en=result.translation_en,
+        language=req.language,
+        engine=transcribe.ENGINE,
+        model=result.model,
+        duration_seconds=result.duration_seconds,
+        transcript_warnings=list(result.transcript_warnings),
+        translation_warnings=list(result.translation_warnings),
+    )
+
+
+@app.post("/translate", response_model=TranslateResponse)
+def translate_text(req: TranslateRequest) -> TranslateResponse:
+    """Typed complaint in the selected language -> machine English, labelled
+    as such. Never a severity; the ASHA must confirm before extraction."""
+    if not req.text.strip():
+        raise HTTPException(status_code=422, detail="empty_text")
+    if req.source_language == "en":
+        raise HTTPException(status_code=422, detail="translation_not_required")
+    try:
+        english = translate.translate_to_english(req.text, req.source_language)
+    except translate.TranslationUnavailable as exc:
+        raise HTTPException(status_code=503, detail={"code": "translation_unavailable", "reason": exc.reason}) from exc
+    if not english:
+        raise HTTPException(status_code=503, detail={"code": "translation_unavailable", "reason": "empty_translation"})
+    return TranslateResponse(
+        translation_en=english,
+        source_language=req.source_language,
+        engine=translate.ENGINE,
+        engine_version=translate.engine_version(),
+    )
 
 
 @app.post("/triage/extract", response_model=ExtractResponse)
@@ -73,12 +107,16 @@ def triage_extract(req: ExtractRequest) -> ExtractResponse:
     complaint_text = req.complaint_text
 
     if req.audio_base64:
+        # Retained for direct service callers. The ASHA app never uses this
+        # path: it calls /transcribe, has the ASHA confirm the text, then
+        # sends only confirmed English complaint_text here (apps/web/lib/ai-gateway.ts).
         try:
-            transcript, translation_en = transcribe.transcribe_and_translate(req.audio_base64, language=req.language)
+            result = transcribe.transcribe_and_translate(req.audio_base64, language=req.language)
         except transcribe.InvalidAudio as exc:
-            raise HTTPException(status_code=422, detail="invalid_audio") from exc
+            raise HTTPException(status_code=422, detail=exc.reason) from exc
         except transcribe.TranscriptionUnavailable as exc:
             raise HTTPException(status_code=503, detail="ai_unavailable") from exc
+        transcript, translation_en = result.transcript, result.translation_en
         # Only English ever reaches the extraction prompt.
         complaint_text = translation_en
 

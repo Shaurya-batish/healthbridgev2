@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Severity = Literal["RED", "YELLOW", "GREEN"]
 
@@ -91,6 +91,92 @@ class EncounterCreateRequest(BaseModel):
     _no_blank = field_validator("abha_number")(_reject_blank)
 
 
+CaptureLanguage = Literal["en", "hi", "pa", "bn", "mr", "ta"]
+_MAX_COMPLAINT = 4000
+
+
+class ComplaintCaptureIn(BaseModel):
+    """Provenance of an LLM-path complaint. Every consistency rule that keeps
+    the English sent to extraction honest is enforced here, server-side --
+    the client UI enforcing the same thing is a convenience, not the control."""
+
+    client_capture_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$")
+    input_source: Literal["typed", "voice"]
+    language: CaptureLanguage
+    original_text: str = Field(min_length=1, max_length=_MAX_COMPLAINT)
+    # The first machine translation (e.g. Whisper's), preserved even after a
+    # correction and retranslation replaced machine_translation_en.
+    initial_machine_translation_en: str | None = Field(default=None, max_length=_MAX_COMPLAINT)
+    initial_translation_engine: str | None = Field(default=None, max_length=120)
+    machine_translation_en: str | None = Field(default=None, max_length=_MAX_COMPLAINT)
+    translation_engine: str | None = Field(default=None, max_length=120)
+    # 'stale' is accepted by the schema only so it can be rejected with a
+    # specific, actionable error rather than a generic enum failure.
+    translation_status: Literal["not_required", "machine", "manual", "stale"]
+    confirmed_original_text: str = Field(min_length=1, max_length=_MAX_COMPLAINT)
+    confirmed_text_en: str = Field(min_length=1, max_length=_MAX_COMPLAINT)
+    captured_at: datetime
+    confirmed_at: datetime
+    consent_confirmed_at: datetime | None = None
+    audio_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    audio_duration_seconds: float | None = Field(default=None, gt=0, le=600)
+    audio_mime_type: str | None = Field(default=None, max_length=100)
+
+    _no_blank = field_validator("original_text", "confirmed_original_text", "confirmed_text_en")(_reject_blank)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ComplaintCaptureIn":
+        if self.translation_status == "stale":
+            raise ValueError("translation_stale_reconfirm_required")
+        if bool(self.initial_machine_translation_en) != bool(self.initial_translation_engine):
+            raise ValueError("initial_translation_requires_text_and_engine")
+        if self.language == "en":
+            if self.translation_status != "not_required":
+                raise ValueError("english_capture_needs_no_translation")
+            if self.confirmed_text_en.strip() != self.confirmed_original_text.strip():
+                raise ValueError("english_capture_texts_must_match")
+        else:
+            if self.translation_status == "not_required":
+                raise ValueError("non_english_capture_requires_translation")
+            if self.translation_status == "machine":
+                if not self.machine_translation_en or not self.translation_engine:
+                    raise ValueError("machine_translation_requires_text_and_engine")
+                if self.machine_translation_en.strip() != self.confirmed_text_en.strip():
+                    raise ValueError("edited_translation_must_be_marked_manual")
+        if self.input_source == "voice":
+            if self.consent_confirmed_at is None:
+                raise ValueError("voice_capture_requires_recording_consent")
+            if not (self.audio_sha256 and self.audio_duration_seconds and self.audio_mime_type):
+                raise ValueError("voice_capture_requires_audio_metadata")
+        elif self.audio_sha256 or self.audio_duration_seconds or self.audio_mime_type or self.consent_confirmed_at:
+            raise ValueError("typed_capture_must_not_carry_audio_metadata")
+        if self.confirmed_at < self.captured_at:
+            raise ValueError("confirmed_before_captured")
+        return self
+
+
+class ComplaintCaptureResponse(BaseModel):
+    id: uuid.UUID
+    input_source: str
+    language: str
+    original_text: str
+    initial_machine_translation_en: str | None
+    initial_translation_engine: str | None
+    machine_translation_en: str | None
+    translation_engine: str | None
+    translation_status: str
+    confirmed_original_text: str
+    confirmed_text_en: str
+    original_edited: bool
+    english_edited: bool
+    captured_at: datetime
+    confirmed_at: datetime
+    consent_confirmed_at: datetime | None
+    audio_sha256: str | None
+    audio_duration_seconds: float | None
+    audio_mime_type: str | None
+
+
 class TriageRequest(BaseModel):
     encounter_id: uuid.UUID
     complaint_text: str | None = Field(default=None, max_length=4000)
@@ -99,9 +185,24 @@ class TriageRequest(BaseModel):
     severity: Severity
     rule_id: str = Field(min_length=1, max_length=64)
     rule_version: str = Field(min_length=1, max_length=32)
+    # Present whenever the ASHA confirmed a typed/voice complaint -- on the LLM
+    # path, and also on the checklist path when extraction was unavailable
+    # after confirmation (the confirmed complaint is still clinical record).
+    # Optional so ops queued offline by an older app build still sync.
+    complaint_capture: ComplaintCaptureIn | None = None
     # No actor_user_id here -- a client-supplied actor would let anyone
     # attribute a triage decision to someone else in the audit log. The
     # router derives it from the authenticated session instead.
+
+    @model_validator(mode="after")
+    def _capture_matches_complaint(self) -> "TriageRequest":
+        if self.complaint_capture is None:
+            return self
+        # The stored complaint (and, on the LLM path, the extraction input)
+        # must be exactly the English the ASHA confirmed.
+        if (self.complaint_text or "").strip() != self.complaint_capture.confirmed_text_en.strip():
+            raise ValueError("complaint_text_must_equal_confirmed_english")
+        return self
 
 
 class TriageRecordResponse(BaseModel):
@@ -114,6 +215,7 @@ class TriageRecordResponse(BaseModel):
     severity: str
     source: str
     created_at: datetime
+    complaint_capture: ComplaintCaptureResponse | None = None
 
 
 class TriageResponse(BaseModel):
@@ -256,8 +358,14 @@ class MedicineStockResponse(BaseModel):
     unit: str
     quantity_on_hand: int
     reorder_threshold: int
+    medicine_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class MedicineStockLinkRequest(BaseModel):
+    # null unlinks the stock row from any imported medicine identity.
+    medicine_id: uuid.UUID | None
 
 
 class MedicineStockMovementResponse(BaseModel):
@@ -354,3 +462,137 @@ class SchemeVerificationResponse(BaseModel):
     abha_number: str
     scheme_status: str
     scheme_verification_status: str
+
+
+# --- Same-composition medicine comparison + substitution review ---
+# Money and strengths are serialised as strings: they are Decimals in
+# Postgres and a float round-trip must never change a displayed price.
+
+
+class MedicineSourceInfo(BaseModel):
+    name: str
+    license: str
+    source_url: str
+    source_version: str | None
+    source_updated_on: date | None
+    imported_at: datetime
+
+
+class MedicineIngredientResponse(BaseModel):
+    name: str
+    strength_value: str | None
+    strength_unit: str | None
+    raw_text: str
+
+
+class MedicineSummary(BaseModel):
+    id: uuid.UUID
+    brand_name: str
+    generic_name: str | None
+    manufacturer: str | None
+    dosage_form: str | None
+    route: str | None
+    release_type: str
+    pack_label: str | None
+    pack_quantity: str | None
+    pack_unit: str | None
+    price: str | None
+    price_basis: str
+    currency: str
+    unit_price: str | None
+    is_discontinued: bool
+    match_status: str
+    insufficient_reasons: list[str]
+    ingredients: list[MedicineIngredientResponse]
+    source: MedicineSourceInfo
+
+
+class MedicineListResponse(BaseModel):
+    items: list[MedicineSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class FacilityStockInfo(BaseModel):
+    # available: linked stock with quantity > 0, counted recently
+    # unavailable: linked stock counted recently at zero
+    # stale: linked stock whose last recorded count is older than the threshold
+    # unknown: this facility has no stock row linked to this medicine
+    status: Literal["available", "unavailable", "stale", "unknown"]
+    stock_id: uuid.UUID | None = None
+    quantity_on_hand: int | None = None
+    last_counted_at: datetime | None = None
+
+
+class SubstituteCandidate(BaseModel):
+    medicine: MedicineSummary
+    stock: FacilityStockInfo
+    price_comparable: bool
+    saving_percent: int | None
+
+
+class SubstitutesResponse(BaseModel):
+    reference: MedicineSummary
+    reference_stock: FacilityStockInfo
+    facility_id: uuid.UUID
+    comparable: bool
+    not_comparable_reasons: list[str]
+    # Ranked best-first and truncated; total_candidates is the full group size.
+    candidates: list[SubstituteCandidate]
+    total_candidates: int
+    notice: str
+    generated_at: datetime
+
+
+class MedicationOrderCreateRequest(BaseModel):
+    encounter_id: uuid.UUID
+    medicine_id: uuid.UUID
+    instructions: str = Field(min_length=1, max_length=1000)
+
+    _no_blank = field_validator("instructions")(_reject_blank)
+
+
+class MedicationOrderResponse(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    medicine: MedicineSummary
+    instructions: str
+    status: str
+    version: int
+    supersedes_order_id: uuid.UUID | None
+    prescribed_by_user_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class SubstitutionRequestCreateRequest(BaseModel):
+    order_id: uuid.UUID
+    proposed_medicine_id: uuid.UUID
+    note: str | None = Field(default=None, max_length=500)
+
+
+class SubstitutionDecisionRequest(BaseModel):
+    decision_note: str | None = Field(default=None, max_length=1000)
+
+
+class SubstitutionRequestResponse(BaseModel):
+    id: uuid.UUID
+    order_id: uuid.UUID
+    patient_id: uuid.UUID
+    encounter_id: uuid.UUID
+    facility_id: uuid.UUID
+    original_medicine: MedicineSummary
+    proposed_medicine: MedicineSummary
+    order_version: int
+    status: str
+    requested_by_user_id: uuid.UUID
+    request_note: str | None
+    reviewed_by_user_id: uuid.UUID | None
+    reviewed_at: datetime | None
+    decision_note: str | None
+    resulting_order_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime

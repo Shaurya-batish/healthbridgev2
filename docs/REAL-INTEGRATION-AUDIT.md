@@ -93,6 +93,21 @@ against a real local backend for everything else.
 - **Tested?** Yes — `tests/test_follow_ups.py`.
 - **Remaining external dependency:** none. (Patient SMS/call reminders would need a telecom gateway — not built; out of scope until a specific provider is chosen.)
 
+### 9. Multilingual complaint capture (typed + voice) — added 2026-09-15
+
+- **External/local dependencies:** faster-whisper `small` (local, CTranslate2), Argos Translate 1.11 with the published hi→en and bn→en packages (local). No cloud service. Ollama/Phi-4-mini for extraction is unchanged and **not installed** in this environment.
+- **Implemented?** Yes — explicit language selection, `/transcribe` (original + English), `/translate` (typed hi/bn), ASHA review with stale-translation blocking, provenance persisted in `complaint_captures` + audit, offline IndexedDB recording queue.
+- **Actually connected?** Whisper and Argos: **yes, run for real** on real non-sensitive speech (Google FLEURS, CC-BY) and real text. Phi-4-mini extraction: **no** (Ollama absent) — the app falls back to the checklist, exercised for real.
+- **Tested?** Unit/contract tests with fakes, real-Postgres router tests, opt-in real-model tests, and a browser end-to-end run in real Chrome with a fake-microphone audio fixture. Not tested: a physical microphone; Punjabi/Bengali/Marathi voice clips; Phi-4-mini extraction.
+- **Honest limits:** Whisper `small` English translation quality is not clinically reliable (measured meaning errors in Hindi, garbled Tamil); typed translation exists only for Hindi and Bengali; UI strings in non-English languages are unreviewed drafts; clinical text stays English until reviewed translations exist. Full detail: `docs/MULTILINGUAL-VOICE-MEDICINES.md`.
+
+### 10. Same-composition medicine comparison + substitution review — added 2026-09-15
+
+- **External data:** `junioralive/Indian-Medicine-Dataset` (MIT), 253,973 rows, sha256 `c9de0182…c042` — **re-downloaded and verified** 2026-09-15; CSV last changed in git commit `45c86f9` (2024-01-30). Price basis is not stated by the source and is shown as such.
+- **Implemented?** Yes — checksum/header-validated idempotent importer, structured identities, fail-closed matching (ingredients + normalised strengths + form + route + release type), real facility stock join, doctor-only prescribing, pending→approved/rejected/invalidated substitution requests with row-locked re-validation and audit.
+- **Actually connected?** Real dataset imported into real PostgreSQL (253,973 rows, 0 rejected, 205,136 matchable); comparisons, stock, prescribing and approval exercised through the real UI and API.
+- **Tested?** Unit (matching/pricing), SQLite router + importer tests with an explicitly SYNTHETIC fixture, real-Postgres authorization/concurrency tests, browser end-to-end. Not verified: that source prices are current or correct (some real rows look implausible), and clinical interchangeability — the UI states comparisons are informational and require clinician review.
+
 ## Summary table
 
 | Feature | Implemented (real code)? | Actually connected to the real external service? | Tested? | Blocked on |
@@ -105,6 +120,10 @@ against a real local backend for everything else.
 | Diagnostics | Yes | n/a (internal) | Mostly (see §6 note) | — |
 | Medicine stock | Yes | n/a (internal) | Yes | — |
 | Follow-up | Yes | n/a (internal) | Yes | — |
+| Voice capture (Whisper) | Yes | Yes — real local model, real speech | Yes (unit, real-model, browser E2E with fake-mic fixture) | Physical-mic test; translation quality |
+| Typed translation (Argos) | Yes (hi, bn) | Yes — real local packages | Yes (unit + real-model) | No published pa/mr/ta packages |
+| LLM extraction (Phi-4-mini) | Yes (pre-existing) | **No** — Ollama not installed here | Unit only | Install Ollama + model |
+| Medicine comparison + substitution | Yes | Yes — real licensed dataset in real Postgres | Yes (unit, real Postgres, browser E2E) | Price currency/accuracy of source data |
 
 ## Manual verification actually performed this session
 

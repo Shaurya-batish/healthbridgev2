@@ -237,6 +237,26 @@ CREATE TABLE follow_ups (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Migrations 0005/0006 (2026-09-15) add, in summary:
+--   complaint_captures      provenance of every confirmed typed/voice complaint
+--                           (input source, selected language, first captured
+--                           text, machine translation + engine, ASHA-confirmed
+--                           original and English, capture/confirm/consent
+--                           timestamps, audio sha256/duration/mime -- never the
+--                           audio). client_capture_id UNIQUE.
+--   medicine_sources        dataset provenance (url, licence, sha256, version,
+--                           price basis, counts). One row per dataset name.
+--   medicines               imported identity: brand, derived generic, form,
+--                           route, release type, pack qty/unit, price, unit
+--                           price, discontinued, match_status, match_key.
+--   medicine_ingredients    ingredient name + normalised strength per medicine.
+--   medicine_stock.medicine_id  FK linking existing inventory to an identity.
+--   medication_orders       doctor-authored, versioned prescription lines.
+--   substitution_requests   pending -> approved | rejected | invalidated;
+--                           partial UNIQUE (order_id, proposed_medicine_id)
+--                           WHERE status = 'pending'.
+-- See services/core/migrations/versions/0005_*.py and 0006_*.py for columns.
+
 -- Real self-hosted store-and-forward teleconsult. media_path points at a
 -- real file on disk under TELECONSULT_MEDIA_DIR; media_checksum_sha256 is
 -- computed from the real uploaded bytes.
@@ -281,6 +301,13 @@ service and never blocks on it.
 - `POST /medicine-stock`, `GET /medicine-stock/facility/{facility_id}`, `POST /medicine-stock/{id}/adjust`, `GET /medicine-stock/{id}/movements` → real inventory; every quantity change writes an append-only `medicine_stock_movements` row.
 - `POST /follow-ups`, `GET /follow-ups/facility/{facility_id}?due_by=`, `GET /follow-ups/patient/{patient_id}`, `POST /follow-ups/{id}/status` → real follow-up scheduling.
 - `POST /teleconsults`, `GET /teleconsults/facility/{facility_id}`, `POST /teleconsults/{id}/media` (real multipart file upload), `GET /teleconsults/{id}/media` (real file download/playback), `POST /teleconsults/{id}/response` → real self-hosted store-and-forward teleconsult.
+- `POST /triage` additionally accepts optional `complaint_capture` (typed/voice provenance, see `ComplaintCaptureIn`). When present, `complaint_text` must equal `complaint_capture.confirmed_text_en`; stale or inconsistent captures are refused with 422 and nothing is written; a replayed `client_capture_id` is 409 `complaint_capture_already_recorded`. The capture is written in the same transaction as the triage record and copied into the `triage_decision` audit row.
+- `GET /medicines?q=&limit=&offset=` → search imported reference medicines (brand or ingredient; `q` 2–100 chars, `limit` ≤ 50, `offset` ≤ 10000).
+- `GET /medicines/{id}` → one medicine with structured ingredients and source provenance.
+- `GET /medicines/{id}/substitutes?facility_id=` → facility-scoped, informational same-composition comparison: exact ingredient set + normalised strengths + form + route + release type (fails closed), real stock status per candidate (`available`/`unavailable`/`stale`/`unknown`), comparable unit price and saving (strictly cheaper only), ranked over the whole match group, top 100 returned with `total_candidates`.
+- `POST /medicine-stock/{id}/link` `{medicine_id | null}` → link existing inventory to an identity (audited, never changes quantity).
+- `POST /medication-orders` (doctor only) `{encounter_id, medicine_id, instructions}`; `GET /medication-orders/{id}`; `GET /medication-orders/patient/{patient_id}?facility_id=`.
+- `POST /substitution-requests` `{order_id, proposed_medicine_id, note?}` (any role with facility access; creates a pending request, changes nothing); `GET /substitution-requests/facility/{facility_id}?status=`; `POST /substitution-requests/{id}/approve` and `/reject` (doctor at that facility only). Approval re-validates under row locks and supersedes the order through the prescribing path; a changed prescription or broken match marks the request `invalidated` (409).
 
 ## AI service API (`services/ai`, FastAPI, port 8100)
 
@@ -293,7 +320,10 @@ persists everything.
   3. Run the shared rule evaluator against those facts.
   4. Return `{transcript?, extracted_facts, severity, rule_id, rule_version}`.
   - If Ollama is unreachable, return `503 {"detail": "ai_unavailable"}` — the gateway/app must treat this as "skip LLM, use checklist," per `CLAUDE.md` offline degradation.
-- `GET /health` → `{ollama_reachable: bool, whisper_available: bool}`
+- `POST /transcribe` `{audio_base64, language, mime_type?}` → `{transcript, translation_en, language, engine, model, duration_seconds}`. Text only, never a severity. 422 `invalid_audio` / `audio_too_short` / `audio_too_long` / `unsupported_audio_format` / `empty_transcript`; 503 `transcription_unavailable`.
+- `POST /translate` `{text, source_language}` → `{translation_en, source_language, engine, engine_version}` via local Argos Translate for TYPED complaints. 503 `{code: translation_unavailable, reason: language_not_installed | engine_not_installed | degraded_mode | translation_failed}`.
+- `GET /health` → `{ai_mode, ollama_reachable, whisper_available, translation_languages}` (non-blocking; languages appear once the translation engine has loaded)
+- The ASHA app uses a two-step voice flow: `/transcribe` → ASHA confirms/corrects → `/triage/extract` with confirmed English `complaint_text` only. The gateway never forwards audio or language to extraction.
 
 ## Gateway / BFF (`apps/web/app/api/**`, Next.js route handlers)
 
@@ -304,6 +334,8 @@ never call Core or AI directly (matches the architecture diagram).
 - `POST /api/patients`, `GET /api/patients/[abha]` → proxies Core
 - `POST /api/encounters` → proxies Core
 - `POST /api/triage/extract` → proxies AI service; on `503`/network error, returns `{ai_unavailable: true}` so the client falls back to the on-device checklist evaluator
+- `POST /api/triage/transcribe`, `POST /api/triage/translate` → authenticated; validate language, audio format and size server-side; always 200 with either a result or a typed `transcription_unavailable` / `translation_unavailable` reason
+- `GET /api/medicines`, `GET /api/medicines/[id]`, `GET /api/medicines/[id]/substitutes`, `POST /api/medicine-stock/[id]/link`, `POST /api/medication-orders`, `GET /api/medication-orders/[id]`, `GET /api/medication-orders/patient/[patientId]`, `POST /api/substitution-requests`, `GET /api/substitution-requests/facility/[facilityId]`, `POST /api/substitution-requests/[id]/approve`, `POST /api/substitution-requests/[id]/reject` → proxy Core (Core enforces roles and facility scope)
 - `POST /api/triage` → proxies Core `/triage` (used for both the LLM path, after `/api/triage/extract`, and the offline checklist path where the client already computed severity on-device)
 - `GET /api/queue/[facilityId]`, `GET /api/escalations/[facilityId]`, `POST /api/escalations/[id]/acknowledge`, `GET /api/dashboard/[facilityId]` → proxy Core
 - `POST /api/patients/[abha]/verify-scheme` → proxies Core; facility-side only, never surfaced to the ASHA app
